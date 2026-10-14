@@ -1,0 +1,49 @@
+{
+    "difficulties": {
+        "easy": {
+            "unlocked_levels": [
+                1,
+                2,
+                3,
+                4
+            ],
+            "level_stars": {
+                "1": 3,
+                "2": 3,
+                "3": 2
+            },
+            "checkpoints": {}
+        },
+        "normal": {
+            "unlocked_levels": [
+                1,
+                2,
+                3,
+                4,
+                5
+            ],
+            "level_stars": {
+                "1": 3,
+                "2": 3,
+                "3": 3,
+                "4": 1
+            },
+            "checkpoints": {}
+        },
+        "hard": {
+            "unlocked_levels": [
+                1
+            ],
+            "level_stars": {},
+            "checkpoints": {}
+        }
+    },
+    "total_collectibles": 48,
+    "achievements": {
+        "first_steps": true,
+        "collector": false,
+        "no_damage": true,
+        "speed_run": true,
+        "all_stars": false
+    }
+}
