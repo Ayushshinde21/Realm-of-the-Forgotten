@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.tmp
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.log
+# Player data (the game now stores these in the user's app-data folder)
+save_data/
+accounts.json
+settings.json
+.idea
+assets
