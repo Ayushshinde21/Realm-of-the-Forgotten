@@ -1,0 +1,1 @@
+Red/green checkpoint flags imported from Checkpoint_Flag_Red_Green_Asset_Pack.\nRed = not yet activated; green = activated/checkpoint reached. Each color has eight animation frames.\nThe checkpoint collision rectangle, respawn coordinates, and checkpoint save IDs are preserved.\n
