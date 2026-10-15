@@ -402,7 +402,8 @@ class Player(GameObject):
                 if (
                     previous_rect.bottom <= platform.rect.top
                     and self.rect.bottom >= platform.rect.top
-                    and self.rect.colliderect(landing_rect)
+                    and self.rect.right > landing_rect.left
+                    and self.rect.left < landing_rect.right
                 ):
                     self.rect.bottom = platform.rect.top
                     self.velocity_y = 0
@@ -525,13 +526,10 @@ class Player(GameObject):
         if self.damage_flash_timer > 0:
             self.damage_flash_timer -= 1
 
-        previous_rect = self.rect.copy()
-        self.previous_center_x = self.rect.centerx
-        moving = self.handle_input()
-        self.apply_gravity()
-        self.handle_platform_collision(platforms, previous_rect)
-
-        # Moving platform carry
+        # Carry a grounded player with the platform before applying gravity
+        # and resolving collisions. Carrying after collision resolution moves
+        # the player an extra platform step below the surface at direction
+        # reversals, which can make the player fall off at the lower endpoint.
         if (
             self.on_ground
             and self.current_platform is not None
@@ -540,6 +538,12 @@ class Player(GameObject):
             platform = self.current_platform
             self.rect.x += platform.rect.x - platform.previous_x
             self.rect.y += platform.rect.y - platform.previous_y
+
+        previous_rect = self.rect.copy()
+        self.previous_center_x = self.rect.centerx
+        moving = self.handle_input()
+        self.apply_gravity()
+        self.handle_platform_collision(platforms, previous_rect)
 
         if self.rect.left < 0:
             self.rect.left = 0

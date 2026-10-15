@@ -91,3 +91,5 @@ original player sprites under `assets/player/`.
 ### Difficulty-specific terrain
 
 Easy difficulty uses the Adventure tileset bundled in `assets/tilesets/adventure_easy/`. Normal keeps the industrial tileset and Hard keeps its existing terrain rendering.
+
+Easy also replaces generated pits with animated thorn patches. Thorn contact slows movement and jumping by 5x and deals 2 hearts of damage per second while contact continues; Normal and Hard retain their existing pit behavior.

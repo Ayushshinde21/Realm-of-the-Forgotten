@@ -13,7 +13,9 @@ class MovingPlatform(Platform):
         height=20,
         movement_type="horizontal",
         movement_distance=120,
-        movement_speed=1.0
+        movement_speed=1.0,
+        movement_min_offset=None,
+        movement_max_offset=None
     ):
 
         super().__init__(
@@ -30,6 +32,18 @@ class MovingPlatform(Platform):
         self.movement_type = movement_type
         self.movement_distance = movement_distance
         self.movement_speed = movement_speed
+        self.movement_min_offset = (
+            -abs(float(movement_distance))
+            if movement_min_offset is None
+            else float(movement_min_offset)
+        )
+        self.movement_max_offset = (
+            abs(float(movement_distance))
+            if movement_max_offset is None
+            else float(movement_max_offset)
+        )
+        if self.movement_min_offset > self.movement_max_offset:
+            raise ValueError("movement_min_offset must not exceed movement_max_offset")
 
         # ==========================================
         # ORIGINAL POSITION
@@ -60,50 +74,24 @@ class MovingPlatform(Platform):
 
     def update(self):
 
-        # Save previous position BEFORE moving
         self.previous_x = self.rect.x
         self.previous_y = self.rect.y
 
-        self.offset += (
-                self.movement_speed
-                * self.direction
-        )
+        self.offset += self.movement_speed * self.direction
 
-        # ==========================================
-        # HORIZONTAL
-        # ==========================================
+        if self.offset >= self.movement_max_offset:
+            self.offset = self.movement_max_offset
+            self.direction = -1
+        elif self.offset <= self.movement_min_offset:
+            self.offset = self.movement_min_offset
+            self.direction = 1
 
         if self.movement_type == "horizontal":
-
-            self.rect.x = int(
-                self.start_x + self.offset
-            )
-
+            self.rect.x = int(self.start_x + self.offset)
             self.rect.y = self.start_y
-
-        # ==========================================
-        # VERTICAL
-        # ==========================================
-
         elif self.movement_type == "vertical":
-
-            self.rect.y = int(
-                self.start_y + self.offset
-            )
-
+            self.rect.y = int(self.start_y + self.offset)
             self.rect.x = self.start_x
-
-        # ==========================================
-        # REVERSE
-        # ==========================================
-
-        if abs(self.offset) >= self.movement_distance:
-            self.offset = (
-                    self.movement_distance
-                    * self.direction
-            )
-
-            self.direction *= -1
 
     # ==============================================
     # DRAW

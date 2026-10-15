@@ -12,6 +12,7 @@ from src.entities.checkpoint import Checkpoint
 from src.world.camera import Camera
 from src.world.platform_generator import PlatformGenerator
 from src.entities.obstacle import Obstacle
+from src.entities.thorn import ThornHazard
 from src.entities.bush import Bush
 from src.entities.enemy import Enemy, SPRITE_ENEMY_TYPES
 from src.entities.boss import Boss
@@ -63,6 +64,8 @@ EASY_COIN_LINE_OFFSET = 18
 EASY_COIN_ARC_HEIGHT = 28
 EASY_COIN_SPACING = 42
 EASY_COIN_MAX_RAISE = 108
+THORN_SLOW_FACTOR = 5.0
+THORN_DAMAGE_INTERVAL_FRAMES = 30  # Two hearts per second at 60 FPS.
 _EASY_COIN_FRAME_CACHE = None
 
 
@@ -261,6 +264,7 @@ class Level:
         # ==========================================
 
         self.pits = []
+        self.thorns = []
         self.generate_pits()
 
         # Regular levels need a safe final checkpoint approach. Boss arenas
@@ -283,6 +287,8 @@ class Level:
         )
         if self.is_boss_level:
             self.player.jump_strength = -17.0
+        self.base_player_jump_strength = self.player.jump_strength
+        self.thorn_damage_timer = 0
 
         # ==========================================
         # COLLECTIBLES
@@ -565,6 +571,11 @@ class Level:
             for pit in self.pits
             if pit.right <= approach_start
         ]
+        self.thorns = [
+            thorn
+            for thorn in self.thorns
+            if thorn.rect.right <= approach_start
+        ]
 
         # Remove moving platforms that would enter the reserved zone.
         self.moving_platforms = [
@@ -649,6 +660,7 @@ class Level:
             getattr(self, "enemies", []),
             getattr(self, "obstacles", []),
             getattr(self, "bushes", []),
+            getattr(self, "thorns", []),
         ):
             for item in group:
                 if item is exclude:
@@ -708,7 +720,7 @@ class Level:
             )
 
         static_hazards = []
-        for group_name in ("checkpoints", "obstacles", "bushes"):
+        for group_name in ("checkpoints", "obstacles", "bushes", "thorns"):
             for item in getattr(self, group_name, []):
                 rect = getattr(item, "rect", None)
                 if rect is not None:
@@ -955,8 +967,20 @@ class Level:
             )
 
             # ======================================
-            # CREATE PIT
+            # CREATE PIT OR EASY THORN HAZARD
             # ======================================
+
+            if self.difficulty == "easy":
+                # Easy keeps solid ground everywhere; the same generated pit
+                # locations become damaging thorn patches instead of holes.
+                self.thorns.append(
+                    ThornHazard(
+                        pit_left,
+                        self.ground.rect.top,
+                        pit_width,
+                    )
+                )
+                continue
 
             # Make pits extend slightly below the visible ground.
             pit = pygame.Rect(
@@ -1007,15 +1031,41 @@ class Level:
                 platform_width = 140
                 platform_height = 20
 
+            movement_distance = 120
+            movement_options = {}
+            if movement_type == "vertical":
+                # Keep vertical platforms at least 40px above the ground
+                # at their lowest point. The upward trip remains 120px,
+                # while the downward limit is shortened to avoid ground contact.
+                ground_clearance = 40
+                max_down_offset = max(
+                    0,
+                    self.ground.rect.top
+                    - ground_clearance
+                    - platform_height
+                    - y
+                )
+                movement_options = {
+                    "movement_min_offset": -movement_distance,
+                    "movement_max_offset": min(
+                        movement_distance,
+                        max_down_offset
+                    )
+                }
+
             platform = MovingPlatform(
                 x,
                 y,
                 platform_width,
                 platform_height,
                 movement_type=movement_type,
-                movement_distance=120,
-                movement_speed=1.0
+                movement_distance=movement_distance,
+                movement_speed=1.0,
+                **movement_options
             )
+            if movement_type == "vertical":
+                # Start by rising, then return only as far as the safe lower limit.
+                platform.direction = -1
 
             self.moving_platforms.append(
                 platform
@@ -1296,15 +1346,19 @@ class Level:
             self.death_flash_timer -= 1
 
         # ------------------------------------------
-        # MOVING PLATFORMS
+        # MOVING PLATFORMS AND THORNS
         # ------------------------------------------
 
         for platform in self.moving_platforms:
             platform.update()
+        for thorn in self.thorns:
+            thorn.update()
 
         # ------------------------------------------
         # PLAYER
         # ------------------------------------------
+
+        self._apply_thorn_movement_effect()
 
         collision_platforms = (
                 self.platforms
@@ -1401,9 +1455,10 @@ class Level:
             self.player.velocity_y = -5
 
         # ------------------------------------------
-        # BUSH EFFECTS
+        # BUSH AND THORN EFFECTS
         # ------------------------------------------
         self.update_bush_effects()
+        self._update_thorn_effects()
         # ------------------------------------------
         # DEATH
         # ------------------------------------------
@@ -1602,6 +1657,16 @@ class Level:
                 self.width,
                 self.ground.rect.top
             )
+
+        # Thorn sprites are drawn before the ground on Easy so the ground's
+        # top edge covers their lower edge. The spikes emerge from the soil
+        # instead of looking like a flat object sitting on top of it.
+        for thorn in self.thorns:
+            if thorn.rect.right < self.camera.x - DRAW_MARGIN:
+                continue
+            if thorn.rect.left > self.camera.x + screen.get_width() + DRAW_MARGIN:
+                continue
+            thorn.draw(screen, self.camera)
 
         # ==========================================
         # GROUND
@@ -2994,6 +3059,46 @@ class Level:
 
                 selected_platform_indices.add(index)
                 created += 1
+
+    def _touching_thorns(self):
+        return [
+            thorn
+            for thorn in self.thorns
+            if thorn.hitbox.colliderect(self.player.rect)
+        ]
+
+    def _apply_thorn_movement_effect(self):
+        """Reduce movement and jump strength while the player overlaps thorns."""
+        touching = bool(self._touching_thorns())
+        if touching:
+            self.player.speed = self.player.base_speed / THORN_SLOW_FACTOR
+            self.player.jump_strength = self.base_player_jump_strength / THORN_SLOW_FACTOR
+        else:
+            self.player.jump_strength = self.base_player_jump_strength
+
+    def _update_thorn_effects(self):
+        touching = bool(self._touching_thorns())
+        self._apply_thorn_movement_effect()
+
+        if not touching:
+            self.thorn_damage_timer = 0
+            return
+
+        self.thorn_damage_timer += 1
+        if self.thorn_damage_timer < THORN_DAMAGE_INTERVAL_FRAMES:
+            return
+
+        self.thorn_damage_timer -= THORN_DAMAGE_INTERVAL_FRAMES
+        if self.player.health > 0:
+            self.player.health = max(0, self.player.health - 1)
+            self.damage_taken = True
+            self.player.take_damage()
+            self.create_particles(
+                self.player.rect.centerx,
+                self.player.rect.bottom - 8,
+                (120, 190, 56),
+                count=5,
+            )
 
     def update_bush_effects(self):
         current_x = self.player.rect.centerx

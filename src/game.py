@@ -98,6 +98,25 @@ class Game:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _should_hide_cursor(self):
+        """Hide the mouse cursor only while active gameplay is running."""
+        return bool(
+            self.logged_in
+            and self.game_started
+            and self.level_selected
+            and self.level is not None
+            and not self.paused
+            and not self.game_over
+            and not self.victory_screen
+            and not self.settings_open
+            and not self.controls_open
+            and not self.credits_open
+            and not self.achievements_screen
+        )
+
+    def _sync_cursor_visibility(self):
+        pygame.mouse.set_visible(not self._should_hide_cursor())
+
     def set_fullscreen(self, enabled):
         if bool(enabled) != self._fullscreen:
             pygame.display.toggle_fullscreen()
@@ -401,6 +420,7 @@ class Game:
         self.screen.blit(snapshot, (random.randint(-mag, mag), random.randint(-mag, mag)))
 
     def draw(self):
+        self._sync_cursor_visibility()
         if not self.logged_in:
             if self.show_create_account:
                 self.registration.draw()
