@@ -14,7 +14,12 @@ from src.world.platform_generator import PlatformGenerator
 from src.entities.obstacle import Obstacle
 from src.entities.thorn import ThornHazard
 from src.entities.bush import Bush
-from src.entities.enemy import Enemy, SPRITE_ENEMY_TYPES
+from src.entities.enemy import (
+    Enemy,
+    SPRITE_ENEMY_TYPES,
+    SPRITE_ENEMY_CONFIG,
+    NORMAL_ZOMBIE_TYPES,
+)
 from src.entities.boss import Boss
 from src.entities.projectile import Projectile
 from src.systems.save_system import save_game, load_game
@@ -22,12 +27,13 @@ from src.effects.particle import Particle
 from src.entities.npc import NPC
 from src.systems.dialogue import Dialogue
 from src.world.level_data import LEVELS
-from src.world.industrial_renderer import (
-    draw_industrial_platform,
-    draw_industrial_ground,
-    draw_industrial_moving_platform,
-    draw_industrial_pit,
-    draw_industrial_background,
+from src.world.green_zone_renderer import (
+    draw_green_zone_platform,
+    draw_green_zone_ground,
+    draw_green_zone_moving_platform,
+    draw_green_zone_pit,
+    draw_green_zone_background,
+    draw_green_zone_decorations,
 )
 from src.world.easy_tileset import (
     draw_easy_ground,
@@ -36,7 +42,6 @@ from src.world.easy_tileset import (
 
 from src.world.level_config import (  # noqa: F401
     BACKGROUND_FILES,
-    NORMAL_BACKGROUND_FILES,
     PIT_FLOOR_OFFSET,
     QUEST_DEFINITIONS,
     ITEM_MIN_SPACING,
@@ -53,11 +58,20 @@ from src.world.level_config import (  # noqa: F401
 ENTITY_ACTIVE_RANGE = 1800
 DRAW_MARGIN = 300
 EASY_SLIME_SIZE_MULTIPLIER = 1.12
+NORMAL_ZOMBIE_SIZE_MULTIPLIER = 1.25
+NORMAL_MOVING_PLATFORM_MIN_TOP = 130
 EASY_ENEMY_SPACING = 450  # Aim for one enemy per 450 horizontal world pixels.
 EASY_ENEMY_START_BUFFER = 300
 EASY_ENEMY_MIN_SEPARATION = 260
 EASY_SLIME_TYPES = ("green_slime", "blue_slime", "red_slime")
 EASY_SWORDSMAN_TYPES = ("swordsman_pink", "swordsman_silver", "swordsman_blue")
+NORMAL_ZOMBIES_BY_ROLE = {
+    "slime": ("zombie_1", "zombie_2", "zombie_woman"),
+    "fast": ("wild_zombie", "zombie_woman", "zombie_4"),
+    "jumper": ("zombie_3", "zombie_man"),
+    "flyer": ("zombie_2", "wild_zombie", "zombie_woman"),
+    "heavy": ("zombie_4", "zombie_man", "wild_zombie"),
+}
 EASY_COIN_SIZE = 30
 EASY_COIN_DRAW_HEIGHT = 34
 EASY_COIN_LINE_OFFSET = 18
@@ -163,25 +177,23 @@ class Level:
         # ==========================================
         # RANDOM BACKGROUND
         # ==========================================
-        # Pick one of the supplied backgrounds for this level instance.
-        # The image is scaled once to the game window and stays fixed
-        # behind the scrolling world.
-        background_pool = (
-            NORMAL_BACKGROUND_FILES
-            if self.difficulty == "normal"
-            else BACKGROUND_FILES
-        )
-        self.background_path = random.choice(background_pool)
-        try:
-            self.background_image = pygame.image.load(
-                self.background_path
-            ).convert()
-            self.background_image = pygame.transform.scale(
-                self.background_image,
-                (WIDTH, HEIGHT)
-            )
-        except (pygame.error, FileNotFoundError):
+        # Normal uses the supplied Green Zone's layered forest renderer. Easy
+        # and Hard keep the existing static background system unchanged.
+        if self.difficulty == "normal":
+            self.background_path = None
             self.background_image = None
+        else:
+            self.background_path = random.choice(BACKGROUND_FILES)
+            try:
+                self.background_image = pygame.image.load(
+                    self.background_path
+                ).convert()
+                self.background_image = pygame.transform.scale(
+                    self.background_image,
+                    (WIDTH, HEIGHT)
+                )
+            except (pygame.error, FileNotFoundError):
+                self.background_image = None
 
         # ==========================================
         # WORLD
@@ -231,6 +243,7 @@ class Level:
         self.generator.max_platform_y = (
             ground_y - self.generator.minimum_ground_platform_gap
         )
+        self.generator.safe_start_zone_width = 300 if self.difficulty == "normal" else 0
 
         # Ramp difficulty across a difficulty's 1..MAX_LEVELS progression
         # (level_progress: 0.0 at level 1, 1.0 at level MAX_LEVELS), then
@@ -257,8 +270,12 @@ class Level:
         # ==========================================
 
         self.moving_platforms = []
+        # Easy and Hard keep their established moving-platform locations and
+        # construction order. Normal places them later, after pits and its
+        # reserved finish approach are known.
+        if self.difficulty != "normal":
+            self.generate_moving_platforms()
 
-        self.generate_moving_platforms()
         # ==========================================
         # DEEP PITS
         # ==========================================
@@ -272,6 +289,9 @@ class Level:
         if not self.is_boss_level:
             self.finish_x = self._find_safe_finish_x()
         self._clear_final_approach_zone()
+
+        if self.difficulty == "normal":
+            self.generate_moving_platforms()
 
         # ==========================================
         # PLAYER
@@ -589,8 +609,34 @@ class Level:
 
 
     def _find_safe_finish_x(self):
-        """Find a finish position on the ground with no platform overlapping the
-        final checkpoint's visible area."""
+        """Choose a clear finish point; Normal reserves its intended end zone."""
+        if self.difficulty == "normal":
+            target = max(100, min(self.width - 100, int(self.width - 200)))
+            marker_half_width = 70
+            marker_height = 125
+            marker_rect = pygame.Rect(
+                target - marker_half_width,
+                self.ground.rect.top - marker_height,
+                marker_half_width * 2,
+                marker_height,
+            )
+
+            # The finish marker has priority over nearby decorative/platforming
+            # geometry. Remove only objects that obstruct its intended area;
+            # the regular final-approach cleanup then clears the route to it.
+            self.platforms = [
+                platform for platform in self.platforms
+                if platform is self.ground or not marker_rect.colliderect(platform.rect)
+            ]
+            self.pits = [
+                pit for pit in self.pits
+                if not pygame.Rect(pit.left - 20, 0, pit.width + 40, self.world_height).colliderect(
+                    pygame.Rect(target - marker_half_width, 0, marker_half_width * 2, self.world_height)
+                )
+            ]
+            return target
+
+        # Legacy Easy/Hard finish selection remains unchanged.
         target = int(self.finish_x)
 
         # The final checkpoint is drawn at 120x120 and its bottom sits on
@@ -832,18 +878,116 @@ class Level:
         self.checkpoints.clear()
         if getattr(self, "is_boss_level", False):
             return
-        # Fewer checkpoints per level: one every 3000px of world width
-        # instead of every 1800px.
+
+        # Keep Easy/Hard checkpoint selection unchanged; the resilient nearby
+        # candidate/fallback behavior below is specific to Normal difficulty.
+        if self.difficulty != "normal":
+            checkpoint_spacing = 3000
+            next_checkpoint_x = checkpoint_spacing
+            for platform in self.platforms[1:]:
+                if platform.rect.centerx < next_checkpoint_x:
+                    continue
+                checkpoint_x = platform.rect.centerx
+                if not self._item_position_clear(checkpoint_x, 130):
+                    continue
+                self.checkpoints.append(
+                    Checkpoint(checkpoint_x, platform.rect.top, len(self.checkpoints))
+                )
+                next_checkpoint_x = checkpoint_x + checkpoint_spacing
+            return
+
         checkpoint_spacing = 3000
-        next_checkpoint_x = checkpoint_spacing
-        for platform in self.platforms[1:]:
-            if platform.rect.centerx < next_checkpoint_x:
+        final_start = int(getattr(self, "final_approach_start", self.width))
+        eligible_platforms = sorted(
+            (
+                platform for platform in self.platforms[1:]
+                if platform is not self.ground
+                and platform.rect.left >= 300
+                and platform.rect.centerx < final_start - 120
+            ),
+            key=lambda platform: platform.rect.centerx,
+        )
+        slots = list(range(checkpoint_spacing, max(checkpoint_spacing + 1, final_start - 120), checkpoint_spacing))
+        if self.difficulty == "normal" and self.width > 3000 and not slots:
+            slots = [min(checkpoint_spacing, max(350, final_start - 200))]
+
+        last_checkpoint_x = 250
+        for slot in slots:
+            candidates = [
+                platform for platform in eligible_platforms
+                if platform.rect.centerx >= last_checkpoint_x + 900
+            ]
+            candidates.sort(key=lambda platform: abs(platform.rect.centerx - slot))
+            checkpoint_placed = False
+
+            for platform in candidates:
+                # Try multiple safe points on the preferred platform before
+                # moving to the next nearby platform.
+                margin = min(50, max(20, platform.rect.width // 5))
+                x_options = [
+                    platform.rect.centerx,
+                    platform.rect.left + margin,
+                    platform.rect.right - margin,
+                ]
+                for checkpoint_x in x_options:
+                    if checkpoint_x < last_checkpoint_x + 900:
+                        continue
+                    if checkpoint_x >= final_start - 100:
+                        continue
+                    if any(pit.left - 40 <= checkpoint_x <= pit.right + 40 for pit in self.pits):
+                        continue
+                    if not self._item_position_clear(checkpoint_x, 130):
+                        continue
+                    self.checkpoints.append(
+                        Checkpoint(checkpoint_x, platform.rect.top, len(self.checkpoints))
+                    )
+                    last_checkpoint_x = checkpoint_x
+                    checkpoint_placed = True
+                    break
+                if checkpoint_placed:
+                    break
+
+            if checkpoint_placed:
                 continue
-            checkpoint_x = platform.rect.centerx
-            if not self._item_position_clear(checkpoint_x, 130):
+
+            if self.difficulty != "normal":
                 continue
-            self.checkpoints.append(Checkpoint(checkpoint_x, platform.rect.top, len(self.checkpoints)))
-            next_checkpoint_x = checkpoint_x + checkpoint_spacing
+
+            # Normal must not silently lose a checkpoint slot just because
+            # nearby platforms conflict with collectibles. Fall back to a
+            # ground checkpoint near the preferred slot, outside pits.
+            low = max(320, last_checkpoint_x + 900)
+            high = max(low, min(final_start - 100, self.width - 250))
+            ground_candidates = sorted(
+                range(low, high + 1, 40),
+                key=lambda x: abs(x - slot),
+            )
+            chosen_x = next((
+                x for x in ground_candidates
+                if not any(pit.left - 50 <= x <= pit.right + 50 for pit in self.pits)
+                and self._item_position_clear(x, 130)
+            ), None)
+            if chosen_x is None:
+                chosen_x = next((
+                    x for x in ground_candidates
+                    if not any(pit.left - 50 <= x <= pit.right + 50 for pit in self.pits)
+                ), None)
+            if chosen_x is not None:
+                self.checkpoints.append(
+                    Checkpoint(chosen_x, self.ground.rect.top, len(self.checkpoints))
+                )
+                last_checkpoint_x = chosen_x
+
+        if self.difficulty == "normal" and self.width > 3000 and not self.checkpoints:
+            fallback_x = min(max(checkpoint_spacing, 350), final_start - 100)
+            if any(pit.left - 50 <= fallback_x <= pit.right + 50 for pit in self.pits):
+                for candidate in range(350, max(351, final_start - 100), 40):
+                    if not any(pit.left - 50 <= candidate <= pit.right + 50 for pit in self.pits):
+                        fallback_x = candidate
+                        break
+            self.checkpoints.append(
+                Checkpoint(fallback_x, self.ground.rect.top, len(self.checkpoints))
+            )
 
     def generate_pits(self):
 
@@ -996,61 +1140,208 @@ class Level:
     # GENERATE MOVING PLATFORMS
     # ==============================================
 
-    def generate_moving_platforms(self):
+    def _normal_moving_platform_sweep(self, x, y, width, height, movement_type, distance):
+        """Return the full swept bounds for a proposed Normal moving platform."""
+        if movement_type == "horizontal":
+            return pygame.Rect(x - distance, y, width + distance * 2, height), 0
 
+        max_down_offset = max(
+            0,
+            self.ground.rect.top - 40 - height - y,
+        )
+        max_down_offset = min(distance, max_down_offset)
+        sweep = pygame.Rect(
+            x,
+            y - distance,
+            width,
+            distance + max_down_offset + height,
+        )
+        return sweep, max_down_offset
+
+    def _generate_normal_moving_platforms(self):
+        """Place moving platforms in generated gaps without sweeping through terrain."""
+        platform_width = 280
+        platform_height = 40
+        preferred_distance = 120
+        final_start = int(getattr(self, "final_approach_start", self.width))
+        min_x = 320
+        max_x = final_start - platform_width - preferred_distance
+        if max_x < min_x:
+            return
+
+        static_platforms = [platform for platform in self.platforms if platform is not None]
+        ordered = sorted(
+            (platform for platform in static_platforms if platform is not self.ground),
+            key=lambda platform: platform.rect.left,
+        )
+
+        # Candidate centers over existing pits and larger gaps get a small
+        # priority, but target slots keep the platforms distributed by world X.
+        preferred_centers = [pit.centerx if hasattr(pit, "centerx") else pit.left + pit.width // 2
+                             for pit in self.pits]
+        for left, right in zip(ordered, ordered[1:]):
+            gap = right.rect.left - left.rect.right
+            if gap >= 60:
+                preferred_centers.append((left.rect.right + right.rect.left) // 2)
+
+        count = max(2, min(5, self.width // 2500))
+        left_center = min_x + platform_width // 2 + preferred_distance
+        right_center = max_x + platform_width // 2
+        if right_center < left_center:
+            return
+        if count == 1:
+            targets = [(left_center + right_center) // 2]
+        else:
+            targets = [
+                round(left_center + (right_center - left_center) * (index / (count - 1)))
+                for index in range(count)
+            ]
+
+        y_candidates = [
+            self.ground.rect.top - clearance
+            for clearance in range(100, 901, 40)
+        ]
+        placed_sweeps = []
+        placed_centers = []
+
+        def try_candidate(target_center, allow_anywhere=False):
+            # Search in increments across a broad window around this slot. Gap
+            # locations nearer the slot sort ahead of equally distant plain ground.
+            centers = set()
+            if allow_anywhere:
+                centers.update(range(min_x + platform_width // 2,
+                                     max_x + platform_width // 2 + 1, 40))
+            else:
+                for offset in range(-600, 601, 40):
+                    centers.add(target_center + offset)
+            centers.update(
+                center for center in preferred_centers
+                if abs(center - target_center) <= 600
+            )
+            centers = [
+                center for center in centers
+                if min_x + platform_width // 2 <= center <= max_x + platform_width // 2
+            ]
+            centers.sort(
+                key=lambda center: (
+                    abs(center - target_center) - (
+                        80 if any(abs(center - gap_center) <= 45 for gap_center in preferred_centers) else 0
+                    ),
+                    abs(center - target_center),
+                )
+            )
+
+            type_order = (
+                ["horizontal", "vertical"]
+                if len(self.moving_platforms) % 2 == 0
+                else ["vertical", "horizontal"]
+            )
+            for center in centers:
+                x = center - platform_width // 2
+                if any(abs(center - existing_center) < platform_width + preferred_distance
+                       for existing_center in placed_centers):
+                    continue
+                if x < min_x or x + platform_width > final_start:
+                    continue
+
+                for movement_type in type_order:
+                    for distance in (preferred_distance, 90, 60, 40):
+                        if movement_type == "horizontal" and x - distance < min_x:
+                            continue
+                        if movement_type == "horizontal" and x + platform_width + distance > final_start:
+                            continue
+
+                        for y in y_candidates:
+                            if y < NORMAL_MOVING_PLATFORM_MIN_TOP:
+                                continue
+                            if movement_type == "vertical" and y - distance < NORMAL_MOVING_PLATFORM_MIN_TOP:
+                                continue
+                            if y > self.ground.rect.top - 80:
+                                continue
+                            sweep, max_down_offset = self._normal_moving_platform_sweep(
+                                x, y, platform_width, platform_height, movement_type, distance
+                            )
+                            if movement_type == "vertical" and y + max_down_offset + platform_height > self.ground.rect.top - 40:
+                                continue
+                            if any(sweep.colliderect(platform.rect) for platform in static_platforms):
+                                continue
+                            if any(sweep.colliderect(previous) for previous in placed_sweeps):
+                                continue
+
+                            movement_options = {}
+                            if movement_type == "vertical":
+                                movement_options = {
+                                    "movement_min_offset": -distance,
+                                    "movement_max_offset": max_down_offset,
+                                }
+                            platform = MovingPlatform(
+                                x,
+                                y,
+                                platform_width,
+                                platform_height,
+                                movement_type=movement_type,
+                                movement_distance=distance,
+                                movement_speed=1.0,
+                                **movement_options,
+                            )
+                            if movement_type == "vertical":
+                                platform.direction = -1
+                            self.moving_platforms.append(platform)
+                            placed_sweeps.append(sweep)
+                            placed_centers.append(center)
+                            return True
+            return False
+
+        for target_center in targets:
+            if len(self.moving_platforms) >= count:
+                break
+            try_candidate(target_center)
+
+        # Level 1 is 5,000px wide and must retain at least two moving
+        # platforms. If preferred pit/gap slots are crowded, search all safe
+        # slots with shorter sweeps rather than putting a platform through terrain.
+        while len(self.moving_platforms) < min(2, count):
+            before = len(self.moving_platforms)
+            try_candidate((min_x + max_x + platform_width) // 2, allow_anywhere=True)
+            if len(self.moving_platforms) == before:
+                break
+
+    def generate_moving_platforms(self):
         self.moving_platforms.clear()
         if getattr(self, "is_boss_level", False):
             return
 
-        # ==========================================
-        # FIXED POSITIONS FOR NOW
-        # ==========================================
-        # Y values are authored relative to the old fixed-height world
-        # (ground at HEIGHT - 80); shift them down by the extra vertical
-        # room the world now has so they still sit near the factory
-        # floor instead of floating high in the new tall world.
-        vertical_offset = self.world_height - HEIGHT
+        if self.difficulty == "normal":
+            self._generate_normal_moving_platforms()
+            return
 
+        # Preserve the previous fixed moving-platform layout for Easy/Hard.
+        vertical_offset = self.world_height - HEIGHT
         positions = [
             (1800, 420 + vertical_offset, "horizontal"),
             (3600, 350 + vertical_offset, "vertical"),
             (5400, 430 + vertical_offset, "horizontal"),
             (7200, 360 + vertical_offset, "vertical"),
-            (8600, 420 + vertical_offset, "horizontal")
+            (8600, 420 + vertical_offset, "horizontal"),
         ]
 
         for x, y, movement_type in positions:
-
-            if self.difficulty == "normal":
-                # Match the normal-difficulty platform size pass.
-                # Moving platforms must also start at least 80px above the ground.
-                y = min(y, self.ground.rect.top - 80)
-                platform_width = 280
-                platform_height = 40
-            else:
-                platform_width = 140
-                platform_height = 20
-
+            platform_width = 140
+            platform_height = 20
             movement_distance = 120
             movement_options = {}
             if movement_type == "vertical":
-                # Keep vertical platforms at least 40px above the ground
-                # at their lowest point. The upward trip remains 120px,
-                # while the downward limit is shortened to avoid ground contact.
                 ground_clearance = 40
                 max_down_offset = max(
                     0,
                     self.ground.rect.top
                     - ground_clearance
                     - platform_height
-                    - y
+                    - y,
                 )
                 movement_options = {
                     "movement_min_offset": -movement_distance,
-                    "movement_max_offset": min(
-                        movement_distance,
-                        max_down_offset
-                    )
+                    "movement_max_offset": min(movement_distance, max_down_offset),
                 }
 
             platform = MovingPlatform(
@@ -1061,15 +1352,11 @@ class Level:
                 movement_type=movement_type,
                 movement_distance=movement_distance,
                 movement_speed=1.0,
-                **movement_options
+                **movement_options,
             )
             if movement_type == "vertical":
-                # Start by rising, then return only as far as the safe lower limit.
                 platform.direction = -1
-
-            self.moving_platforms.append(
-                platform
-            )
+            self.moving_platforms.append(platform)
 
 
     # ==============================================
@@ -1369,7 +1656,12 @@ class Level:
         # REMOVE GROUND COLLISION INSIDE PITS
         # ------------------------------------------
 
-        if self.player.rect.bottom >= self.world_height - 100:
+        predicted_bottom = (
+            self.player.rect.bottom
+            + self.player.velocity_y
+            + self.player.gravity
+        )
+        if predicted_bottom >= self.world_height - 100:
 
             collision_platforms = []
 
@@ -1630,32 +1922,19 @@ class Level:
 
         if self.is_boss_level:
             self._draw_boss_arena_background(screen)
-        elif self.background_image is not None:
-            if self.difficulty == "normal":
-                # Subtle far-background parallax so the vertical camera
-                # doesn't make the backdrop feel like a static sticker.
-                parallax = 0.06
-                offset_x = -int(self.camera.x * parallax) % max(1, WIDTH)
-                offset_y = -int(self.camera.y * parallax)
-                offset_y = max(-40, min(40, offset_y))
-                screen.blit(self.background_image, (offset_x - WIDTH, offset_y))
-                screen.blit(self.background_image, (offset_x, offset_y))
-            else:
-                screen.blit(
-                    self.background_image,
-                    (0, 0)
-                )
-
-        # ==========================================
-        # INDUSTRIAL BACKGROUND STRUCTURES (normal only)
-        # ==========================================
-
-        if self.difficulty == "normal":
-            draw_industrial_background(
+        elif self.difficulty == "normal":
+            draw_green_zone_background(
                 screen,
                 self.camera,
                 self.width,
-                self.ground.rect.top
+                self.ground.rect.top,
+                seed=self.seed,
+                level_number=self.level_number,
+            )
+        elif self.background_image is not None:
+            screen.blit(
+                self.background_image,
+                (0, 0)
             )
 
         # Thorn sprites are drawn before the ground on Easy so the ground's
@@ -1675,7 +1954,7 @@ class Level:
         if self.is_boss_level:
             self._draw_boss_arena_ground(screen)
         elif self.difficulty == "normal":
-            draw_industrial_ground(
+            draw_green_zone_ground(
                 screen,
                 self.camera,
                 self.ground.rect,
@@ -1728,7 +2007,7 @@ class Level:
                 continue
 
             if self.difficulty == "normal":
-                draw_industrial_platform(
+                draw_green_zone_platform(
                     screen,
                     self.camera,
                     platform.rect,
@@ -1793,7 +2072,7 @@ class Level:
         for index, platform in enumerate(self.moving_platforms):
 
             if self.difficulty == "normal":
-                draw_industrial_moving_platform(
+                draw_green_zone_moving_platform(
                     screen,
                     self.camera,
                     platform.rect,
@@ -1823,7 +2102,7 @@ class Level:
             )
 
             if self.difficulty == "normal":
-                draw_industrial_pit(
+                draw_green_zone_pit(
                     screen,
                     self.camera,
                     pit,
@@ -1848,35 +2127,60 @@ class Level:
                 pit_floor_height
             )
             pit_floor_rect = self.camera.apply(pit_floor_world_rect)
-            pygame.draw.rect(
-                screen,
-                (75, 50, 35),
-                pit_floor_rect
-            )
-            pygame.draw.line(
-                screen,
-                (110, 75, 45),
-                (pit_floor_rect.left, pit_floor_rect.top),
-                (pit_floor_rect.right, pit_floor_rect.top),
-                3
-            )
+            if self.difficulty == "normal":
+                pygame.draw.rect(screen, (35, 29, 49), pit_floor_rect)
+                pygame.draw.line(
+                    screen,
+                    (79, 111, 58),
+                    (pit_floor_rect.left, pit_floor_rect.top),
+                    (pit_floor_rect.right, pit_floor_rect.top),
+                    3
+                )
+                pygame.draw.line(
+                    screen,
+                    (91, 160, 61),
+                    (pit_rect.left, pit_rect.top + 2),
+                    (min(pit_rect.left + 12, pit_rect.right), pit_rect.top + 2),
+                    4
+                )
+                pygame.draw.line(
+                    screen,
+                    (91, 160, 61),
+                    (max(pit_rect.left, pit_rect.right - 12), pit_rect.top + 2),
+                    (pit_rect.right, pit_rect.top + 2),
+                    4
+                )
+            else:
+                pygame.draw.rect(screen, (75, 50, 35), pit_floor_rect)
+                pygame.draw.line(
+                    screen,
+                    (110, 75, 45),
+                    (pit_floor_rect.left, pit_floor_rect.top),
+                    (pit_floor_rect.right, pit_floor_rect.top),
+                    3
+                )
+                pygame.draw.line(
+                    screen,
+                    (180, 60, 40),
+                    (pit_rect.left, pit_rect.top),
+                    (pit_rect.right, pit_rect.top),
+                    5
+                )
 
-            # Small warning edge
-
-            pygame.draw.line(
+        # Normal-only decorative props: this renderer reads the existing
+        # world rectangles and never adds collision or damage behavior.
+        if self.difficulty == "normal":
+            draw_green_zone_decorations(
                 screen,
-                (180, 60, 40),
-                (
-                    pit_rect.left,
-                    pit_rect.top
-                ),
-                (
-                    pit_rect.right,
-                    pit_rect.top
-                ),
-                5
+                self.camera,
+                self.width,
+                self.ground.rect,
+                self.platforms[1:],
+                self.pits,
+                seed=self.seed,
+                level_number=self.level_number,
+                finish_x=self.finish_x,
             )
-
 
         # ==========================================
         # CHECKPOINTS
@@ -2674,9 +2978,8 @@ class Level:
             # ======================================
             # NORMAL DIFFICULTY: SPRITE ENEMY TYPE
             # ======================================
-            # Reuses the same progress-based rarity curve above, but on
-            # normal difficulty every legacy slot is re-skinned as one of
-            # the 6 animated sprite enemies instead of a vector shape.
+            # Reuses the existing progress-based spawn distribution. Normal
+            # enemies now use only the seven supplied zombie variants.
 
             sprite_key = None
 
@@ -2700,18 +3003,12 @@ class Level:
                     )[0]
 
             if self.difficulty == "normal":
-
-                legacy_to_sprite = {
-                    "slime": "worker",
-                    "jumper": "boxer",
-                    "flyer": "chopper",
-                    "heavy": "hammerbot",
-                }
-
-                if enemy_type == "fast":
-                    sprite_key = random.choice(["minebot", "soldier"])
-                else:
-                    sprite_key = legacy_to_sprite.get(enemy_type, "worker")
+                # Normal's roster is replaced completely by animated zombies.
+                # Keep the previous spawn-role distribution, but select visual
+                # zombie variants for each role instead of worker/robot sprites.
+                sprite_key = random.choice(
+                    NORMAL_ZOMBIES_BY_ROLE.get(enemy_type, NORMAL_ZOMBIE_TYPES)
+                )
 
             # ======================================
             # EASY PLATFORM FIT
@@ -2745,6 +3042,23 @@ class Level:
                 enemy_width = 58
                 enemy_height = 58
                 speed = 0.85
+
+            elif self.difficulty == "normal" and sprite_key in NORMAL_ZOMBIE_TYPES:
+
+                enemy_height = round(
+                    SPRITE_ENEMY_CONFIG.get(sprite_key, {}).get("target_h", 62)
+                    * NORMAL_ZOMBIE_SIZE_MULTIPLIER
+                )
+                enemy_width = enemy_height
+                if platform.rect.width < max(140 if enemy_type == "heavy" else 0, enemy_width + 40):
+                    continue
+                speed = {
+                    "slime": 0.90,
+                    "fast": 1.35,
+                    "jumper": 1.05,
+                    "flyer": 1.0,
+                    "heavy": 0.82,
+                }.get(enemy_type, 1.0)
 
             elif enemy_type == "heavy":
 
@@ -2835,6 +3149,8 @@ class Level:
                 sprite_scale=(
                     EASY_SLIME_SIZE_MULTIPLIER
                     if self.difficulty == "easy" and sprite_key in EASY_SLIME_TYPES
+                    else NORMAL_ZOMBIE_SIZE_MULTIPLIER
+                    if self.difficulty == "normal" and sprite_key in NORMAL_ZOMBIE_TYPES
                     else 1.0
                 ),
             )
@@ -2856,6 +3172,16 @@ class Level:
                 if enemy.rect.right > right_limit:
                     enemy.rect.right = right_limit
                 enemy.platform_top = platform.rect.top
+
+            if self.difficulty == "normal":
+                start_safe_zone = pygame.Rect(
+                    0,
+                    self.ground.rect.top - 140,
+                    300,
+                    140,
+                )
+                if enemy.rect.colliderect(start_safe_zone):
+                    continue
 
             self.enemies.append(enemy)
             if enemy_type == "heavy":

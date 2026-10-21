@@ -1,20 +1,12 @@
 """Level constants (split out of level.py)."""
 
-# Random pixel-art backgrounds supplied for the game.
-# Normal difficulty gets its own dedicated background set; easy/hard keep
-# the original shared set.
+# Legacy Adventure backgrounds used as static fallbacks. Normal renders its
+# Green Zone layers from assets/tilesets/green_zone/backgrounds/.
 BACKGROUND_FILES = [
     "assets/backgrounds/background_1.png",
     "assets/backgrounds/background_2.png",
     "assets/backgrounds/background_3.png",
     "assets/backgrounds/background_4.png",
-]
-
-NORMAL_BACKGROUND_FILES = [
-    "assets/backgrounds/background_normal_1.png",
-    "assets/backgrounds/background_normal_2.png",
-    "assets/backgrounds/background_normal_3.png",
-    "assets/backgrounds/background_normal_4.png",
 ]
 
 # Extra pit depth so falling players reach a visible death floor.

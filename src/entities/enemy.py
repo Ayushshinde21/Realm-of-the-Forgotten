@@ -6,6 +6,7 @@ import pygame
 from src.entities.enemy_sprites import (  # noqa: F401
     SPRITE_ENEMY_TYPES,
     SPRITE_ENEMY_CONFIG,
+    NORMAL_ZOMBIE_TYPES,
     ENEMY_ANIM_NAMES,
     _ENEMY_FRAME_CACHE,
     _enemy_frame_files,
@@ -76,6 +77,8 @@ class Enemy:
             width,
             height
         )
+        self._normal_zombie_x = float(self.rect.x)
+        self._normal_zombie_rect_x = self.rect.x
 
         # ==========================================
         # MOVEMENT
@@ -184,7 +187,7 @@ class Enemy:
         self.anim_name = "run"
         self.anim_frame = 0
         self.anim_timer = 0
-        self.anim_speed = 7
+        self.anim_speed = 6 if self.sprite_key in NORMAL_ZOMBIE_TYPES else 7
         self.hurt_timer = 0
         self.dying_timer = 0
         self.attack_cooldown_timer = 0
@@ -457,6 +460,37 @@ class Enemy:
     # enough, then either approach-and-melee, rush-and-explode, or hold
     # ground and fire a ranged attack (bullet / dropped bomb).
 
+    def _sync_normal_zombie_x(self):
+        if self.rect.x != self._normal_zombie_rect_x:
+            self._normal_zombie_x = float(self.rect.x)
+            self._normal_zombie_rect_x = self.rect.x
+
+    def _set_normal_zombie_x(self, x, clamp_to_limits=True):
+        x = float(x)
+        if clamp_to_limits:
+            lower = float(self.left_limit)
+            upper = float(max(self.left_limit, self.right_limit - self.rect.width))
+            x = max(lower, min(upper, x))
+        self._normal_zombie_x = x
+        self.rect.x = int(round(x))
+        self._normal_zombie_rect_x = self.rect.x
+
+    def _move_normal_zombie_patrol(self):
+        lower = float(self.left_limit)
+        upper = float(max(self.left_limit, self.right_limit - self.rect.width))
+        if upper <= lower:
+            self._set_normal_zombie_x(lower)
+            return
+
+        next_x = self._normal_zombie_x + float(self.speed) * self.direction
+        if next_x <= lower:
+            next_x = lower
+            self.direction = 1
+        elif next_x >= upper:
+            next_x = upper
+            self.direction = -1
+        self._set_normal_zombie_x(next_x)
+
     def _enter_patrol(self):
         self.state = "patrol"
         self.anim_name = "run"
@@ -470,12 +504,20 @@ class Enemy:
         self.anim_timer = 0
         self._fired = False
 
-    def _advance_animation(self):
+    def _advance_animation(self, loop=False):
         frames = self.anims.get(self.anim_name) or []
+        if not frames:
+            self.anim_timer = 0
+            self.anim_frame = 0
+            return frames
+
         self.anim_timer += 1
         if self.anim_timer >= self.anim_speed:
             self.anim_timer = 0
-            self.anim_frame += 1
+            if loop:
+                self.anim_frame = (self.anim_frame + 1) % len(frames)
+            else:
+                self.anim_frame = min(self.anim_frame + 1, len(frames))
         return frames
 
     def _trigger_attack_effect(self, player, level):
@@ -528,6 +570,9 @@ class Enemy:
 
         cfg = self.cfg
         style = cfg.get("style", "melee")
+        is_normal_zombie = self.sprite_key in NORMAL_ZOMBIE_TYPES
+        if is_normal_zombie:
+            self._sync_normal_zombie_x()
 
         # ------------------------------------------
         # DYING
@@ -575,7 +620,10 @@ class Enemy:
         # PATROL
         # ------------------------------------------
         if self.state == "patrol":
-            self.move_horizontal()
+            if is_normal_zombie:
+                self._move_normal_zombie_patrol()
+            else:
+                self.move_horizontal()
             self.anim_name = "run"
             self.facing = self.direction
 
@@ -598,9 +646,14 @@ class Enemy:
         # ------------------------------------------
         elif self.state == "approach":
             self.facing = 1 if dx >= 0 else -1
-            self.rect.x += int(self.speed * self.facing)
-            self.rect.left = max(self.rect.left, self.left_limit)
-            self.rect.right = min(self.rect.right, self.right_limit)
+            if is_normal_zombie:
+                self._set_normal_zombie_x(
+                    self._normal_zombie_x + float(self.speed) * self.facing
+                )
+            else:
+                self.rect.x += int(self.speed * self.facing)
+                self.rect.left = max(self.rect.left, self.left_limit)
+                self.rect.right = min(self.rect.right, self.right_limit)
             self.anim_name = "run"
 
             if player is None or not same_level or dist_x > detect * 1.3:
@@ -614,7 +667,13 @@ class Enemy:
         elif self.state == "chase":
             self.facing = 1 if dx >= 0 else -1
             chase_speed = cfg.get("chase_speed", self.speed * 2)
-            self.rect.x += int(chase_speed * self.facing)
+            if is_normal_zombie:
+                self._set_normal_zombie_x(
+                    self._normal_zombie_x + float(chase_speed) * self.facing,
+                    clamp_to_limits=style != "rush",
+                )
+            else:
+                self.rect.x += int(chase_speed * self.facing)
             self.anim_name = "run"
 
             if player is None or dist_x > detect * 1.6:
@@ -657,7 +716,7 @@ class Enemy:
 
         # Advance whichever locomotion animation is currently playing.
         if self.state in ("patrol", "approach", "chase"):
-            self._advance_animation()
+            self._advance_animation(loop=is_normal_zombie)
 
     # ==============================================
     # COMBAT

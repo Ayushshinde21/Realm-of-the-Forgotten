@@ -78,7 +78,7 @@ Zip the `dist/VeggieQuest` folder and share it; no Python is needed to run it.
 
 ## Animated Slime Enemies
 
-The Green, Blue, and Red Slime sprite sheets are integrated as animated enemies. Their idle, run, attack, hurt, and death frames are stored under `assets/enemies/`. Easy uses only these three slime variants, with Green most common, slightly enlarged sprites, and no rocks or bushes. Hard retains its existing enemy and obstacle generation; Normal keeps its industrial robot enemy roster.
+The Green, Blue, and Red Slime sprite sheets are integrated as animated enemies. Their idle, run, attack, hurt, and death frames are stored under `assets/enemies/`. Easy uses only these three slime variants, with Green most common, slightly enlarged sprites, and no rocks or bushes. Hard retains its existing enemy and obstacle generation; Normal keeps its robot enemy roster.
 
 The source sprite package also contains jump, walk, and run-attack sheets; the current integration uses the five gameplay states needed by the existing enemy AI.
 
@@ -90,6 +90,25 @@ original player sprites under `assets/player/`.
 
 ### Difficulty-specific terrain
 
-Easy difficulty uses the Adventure tileset bundled in `assets/tilesets/adventure_easy/`. Normal keeps the industrial tileset and Hard keeps its existing terrain rendering.
+Easy difficulty uses the Adventure tileset bundled in `assets/tilesets/adventure_easy/`. Normal uses the supplied Green Zone tileset, while Hard keeps its existing terrain rendering.
 
 Easy also replaces generated pits with animated thorn patches. Thorn contact slows movement and jumping by 5x and deals 2 hearts of damage per second while contact continues; Normal and Hard retain their existing pit behavior.
+
+## Normal Difficulty — Green Zone
+
+All 10 Normal levels use the supplied Green Zone pack under
+`assets/tilesets/green_zone/`. The environment includes layered day/night
+forest and skyline backgrounds, grass-topped ground and platforms, rocky pit
+walls, trees, stones, and animated fountains. Levels 1–5 use daylight artwork
+and levels 6–10 use the night palette. Decorative placements are deterministic
+for a given level seed and do not add collisions or change gameplay geometry.
+Easy retains its Adventure/thorn environment and Hard retains its existing
+terrain renderer and gameplay.
+## Normal Difficulty Zombie Enemies
+
+Normal difficulty uses seven animated zombie variants from the bundled urban
+and character zombie sprite-sheet packs. Idle, walk/run, attack, hurt, and death
+frames are sliced and cached when first used. Zombie variants share melee combat
+with different reach, detection distance, recovery time, height, and movement
+speed. Easy and Hard keep their separate enemy rosters.
+

@@ -1,173 +1,225 @@
-"""
-Industrial tileset loader/slicer for NORMAL difficulty.
+"""Cached loader for the supplied Industrial Zone asset pack.
 
-Loads assets/tilesets/normal_tileset.png ONCE, slices it into individual
-pixel-art tiles using the real (measured) grid of the supplied sprite
-sheet, and exposes them by semantic name so the renderer never has to
-know raw row/column numbers.
-
-The sheet is NOT a perfectly uniform grid (some tiles have a couple of
-stray pixels of padding), so the exact pixel bounding box of every one
-of the 10 columns x 8 rows was measured directly from the source image
-and is hard-coded below. This avoids fractional/blurry slicing.
+The pack contains individual 32px tiles and separated background, object,
+and animation categories; it is not a single tile sheet. All paths are rooted
+at the project assets directory so launching from another working directory
+still finds the art.
 """
+from __future__ import annotations
+
+from pathlib import Path
 
 import pygame
 
-TILESET_PATH = "assets/tilesets/normal_tileset.png"
+from src.paths import ASSETS_DIR
 
-# Rendered tile size used everywhere in the industrial renderer.
-# The source tiles are ~137-141px, which is a clean 3x of 48 -> keeps
-# scaling as an integer-ish downscale instead of a blurry stretch.
-TILE_SIZE = 48
+TILE_SIZE = 32
+INDUSTRIAL_ROOT = ASSETS_DIR / "tilesets" / "industrial_zone"
+TILES_DIR = INDUSTRIAL_ROOT / "tiles"
+BACKGROUNDS_DIR = INDUSTRIAL_ROOT / "backgrounds"
+OBJECTS_DIR = INDUSTRIAL_ROOT / "objects"
+ANIMATED_OBJECTS_DIR = INDUSTRIAL_ROOT / "animated_objects"
 
-# Measured (inclusive) pixel bounding boxes of each of the 10 columns
-# and 8 rows of the source sheet (1800x1200).
-_COL_BOUNDS = [
-    (184, 320), (328, 465), (472, 607), (616, 753), (759, 897),
-    (903, 1043), (1048, 1187), (1192, 1333), (1335, 1468), (1480, 1615),
-]
-_ROW_BOUNDS = [
-    (25, 166), (169, 310), (313, 454), (457, 598),
-    (601, 742), (745, 886), (890, 1024), (1034, 1174),
-]
+# Every supplied animation strip is horizontal. Frame dimensions are explicit
+# because several sheets are not square (Entry and Hammer are 32x64 frames).
+_ANIMATION_LAYOUT = {
+    "Card": (24, 24),
+    "Chest": (32, 32),
+    "Entry": (32, 64),
+    "Hammer": (32, 64),
+    "Money": (24, 24),
+    "Platform": (32, 32),
+    "Screen1": (32, 32),
+    "Screen2": (32, 42),
+    "Transporter": (32, 32),
+    "Transporter1": (32, 32),
+    "Transporter2": (32, 32),
+    "Transporter3": (32, 32),
+}
+
+# Semantic aliases retained for compatibility with code/tests that used the
+# old interface. They point to actual individual assets in this pack.
+_TILE_ALIASES = {
+    "CORNER_TOP_LEFT": 73,
+    "TOP": 77,
+    "CORNER_TOP_RIGHT": 79,
+    "LEFT": 55,
+    "CENTER": 5,
+    "RIGHT": 56,
+    "CORNER_BOTTOM_LEFT": 64,
+    "BOTTOM": 65,
+    "CORNER_BOTTOM_RIGHT": 66,
+    "PANEL_VARIANT_1": 4,
+    "PANEL_VARIANT_2": 6,
+    "PANEL_VARIANT_3": 12,
+    "PANEL_VARIANT_4": 16,
+    "PANEL_PLAIN": 14,
+    "PANEL_DARK": 21,
+    "CROSS_BRACE_1": 62,
+    "CROSS_BRACE_2": 71,
+    "BOLT_PANEL": 7,
+    "BUTTON_PANEL": 74,
+    "VENT_PANEL": 18,
+    "HAZARD_TOP_LEFT": 31,
+    "HAZARD_TOP": 80,
+    "HAZARD_TOP_RIGHT": 81,
+    "HAZARD_CENTER": 40,
+    "HAZARD_CENTER_2": 34,
+    "HAZARD_BOTTOM_LEFT": 49,
+    "HAZARD_BOTTOM": 58,
+    "HAZARD_BOTTOM_RIGHT": 60,
+    "HAZARD_SINGLE": 9,
+    "HAZARD_CROSS": 36,
+    "PIPE_TOP": 61,
+    "PIPE_MID": 70,
+    "PIPE_MID_2": 63,
+    "PIPE_BOTTOM": 72,
+    "SUPPORT_BEAM": 70,
+    "SUPPORT_BEAM_2": 61,
+    "SUPPORT_BLOCK": 73,
+    "SUPPORT_BLOCK_2": 64,
+    "SUPPORT_SMALL": 18,
+    "CROSS_X_BIG": 71,
+    "CROSS_X_SMALL": 62,
+    "WARNING_GATE": 31,
+    "VENT_GRILLE": 18,
+    "GRATE": 62,
+    "DARK_VOID": 46,
+    "LADDER": 61,
+    "LADDER_2": 70,
+    "ACCENT_PURPLE": 1,
+    "ACCENT_PURPLE_2": 10,
+    "CIRCLE_BUTTON": 37,
+    "TRIANGLE_WEDGE": 38,
+    "HALF_HAZARD": 80,
+    "HALF_HAZARD_2": 81,
+}
+
+
+def _load_surface(path: Path):
+    """Load an image once, preserving alpha and supporting dummy/test displays."""
+    try:
+        image = pygame.image.load(str(path))
+    except (pygame.error, OSError, FileNotFoundError):
+        return None
+    try:
+        return image.convert_alpha()
+    except pygame.error:
+        return image.copy()
 
 
 class IndustrialTileset:
-    """Singleton-style tileset: loaded and sliced exactly once."""
+    """Singleton-style asset cache for the complete industrial environment."""
 
     _instance = None
 
     def __init__(self):
         self.tile_size = TILE_SIZE
-        self._cells = {}  # (row, col) -> pygame.Surface (TILE_SIZE x TILE_SIZE)
+        self.tiles: dict[int, pygame.Surface] = {}
+        self.objects: dict[str, pygame.Surface] = {}
+        self.backgrounds: dict[str, pygame.Surface] = {}
+        self.animated_sheets: dict[str, pygame.Surface] = {}
+        self.animations: dict[str, tuple[pygame.Surface, ...]] = {}
+        self._scaled_backgrounds: dict[tuple[str, int], pygame.Surface] = {}
         self._named = {}
-        self._loaded = False
+        self.loaded = False
         self._load()
 
-    # ------------------------------------------------------------
     def _load(self):
-        try:
-            sheet = pygame.image.load(TILESET_PATH).convert_alpha()
-        except (pygame.error, FileNotFoundError):
-            self._loaded = False
-            return
+        for path in sorted(TILES_DIR.glob("IndustrialTile_*.png")):
+            try:
+                tile_id = int(path.stem.rsplit("_", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            image = _load_surface(path)
+            if image is not None:
+                self.tiles[tile_id] = image
 
-        for row, (y0, y1) in enumerate(_ROW_BOUNDS):
-            for col, (x0, x1) in enumerate(_COL_BOUNDS):
-                w = x1 - x0 + 1
-                h = y1 - y0 + 1
-                # Guard against sheet edits with different dimensions.
-                w = max(1, min(w, sheet.get_width() - x0))
-                h = max(1, min(h, sheet.get_height() - y0))
-                try:
-                    raw = sheet.subsurface(pygame.Rect(x0, y0, w, h)).copy()
-                except ValueError:
-                    continue
-                tile = pygame.transform.scale(raw, (TILE_SIZE, TILE_SIZE))
-                self._cells[(row, col)] = tile
+        for directory, destination in (
+            (BACKGROUNDS_DIR, self.backgrounds),
+            (OBJECTS_DIR, self.objects),
+        ):
+            for path in sorted(directory.glob("*.png")):
+                image = _load_surface(path)
+                if image is not None:
+                    destination[path.stem] = image
 
-        self._loaded = bool(self._cells)
-        self._build_named_map()
+        for path in sorted(ANIMATED_OBJECTS_DIR.glob("*.png")):
+            name = path.stem
+            sheet = _load_surface(path)
+            if sheet is None:
+                continue
+            self.animated_sheets[name] = sheet
+            frame_size = _ANIMATION_LAYOUT.get(name)
+            if frame_size is None:
+                continue
+            frame_width, frame_height = frame_size
+            frame_count = sheet.get_width() // frame_width
+            if frame_count < 1 or frame_height > sheet.get_height():
+                continue
+            frames = []
+            for index in range(frame_count):
+                frame_rect = pygame.Rect(index * frame_width, 0, frame_width, frame_height)
+                if frame_rect.right > sheet.get_width():
+                    break
+                frames.append(sheet.subsurface(frame_rect).copy())
+            if frames:
+                self.animations[name] = tuple(frames)
 
-    # ------------------------------------------------------------
-    def _cell(self, row, col):
-        return self._cells.get((row, col))
+        self.loaded = bool(self.tiles)
+        self._named = {name: self.tiles.get(tile_id) for name, tile_id in _TILE_ALIASES.items()}
 
-    def _build_named_map(self):
-        c = self._cell
+    def tile(self, tile_id: int):
+        return self.tiles.get(int(tile_id))
 
-        # ---- platform / wall frame ----
-        self._named.update({
-            "CORNER_TOP_LEFT": c(0, 3),
-            "TOP": c(0, 4),
-            "CORNER_TOP_RIGHT": c(0, 5),
-            "LEFT": c(1, 3),
-            "CENTER": c(1, 4),
-            "RIGHT": c(1, 5),
-            "CORNER_BOTTOM_LEFT": c(2, 3),
-            "BOTTOM": c(2, 4),
-            "CORNER_BOTTOM_RIGHT": c(2, 5),
-
-            # extra body/panel variants for visual variety
-            "PANEL_VARIANT_1": c(6, 0),
-            "PANEL_VARIANT_2": c(6, 1),
-            "PANEL_VARIANT_3": c(7, 0),
-            "PANEL_VARIANT_4": c(7, 1),
-            "PANEL_PLAIN": c(0, 2),
-            "PANEL_DARK": c(2, 2),
-
-            # cross-braced structural panels (background walls)
-            "CROSS_BRACE_1": c(0, 6),
-            "CROSS_BRACE_2": c(0, 7),
-            "BOLT_PANEL": c(0, 1),
-            "BUTTON_PANEL": c(2, 6),
-            "VENT_PANEL": c(2, 7),
-
-            # hazard stripes
-            "HAZARD_TOP_LEFT": c(3, 3),
-            "HAZARD_TOP": c(3, 4),
-            "HAZARD_TOP_RIGHT": c(3, 5),
-            "HAZARD_CENTER": c(4, 4),
-            "HAZARD_CENTER_2": c(4, 3),
-            "HAZARD_BOTTOM_LEFT": c(7, 3),
-            "HAZARD_BOTTOM": c(7, 4),
-            "HAZARD_BOTTOM_RIGHT": c(7, 5),
-            "HAZARD_SINGLE": c(0, 8),
-            "HAZARD_CROSS": c(5, 6),
-
-            # pipes (vertical, stack top->mid->bottom)
-            "PIPE_TOP": c(4, 8),
-            "PIPE_MID": c(5, 8),
-            "PIPE_MID_2": c(6, 8),
-            "PIPE_BOTTOM": c(7, 6),
-
-            # support beams / small blocks
-            "SUPPORT_BEAM": c(1, 8),
-            "SUPPORT_BEAM_2": c(2, 8),
-            "SUPPORT_BLOCK": c(1, 9),
-            "SUPPORT_BLOCK_2": c(2, 9),
-            "SUPPORT_SMALL": c(3, 9),
-
-            # decoration
-            "CROSS_X_BIG": c(3, 8),
-            "CROSS_X_SMALL": c(6, 7),
-            "WARNING_GATE": c(7, 7),
-            "VENT_GRILLE": c(5, 1),
-            "GRATE": c(5, 2),
-            "DARK_VOID": c(5, 0),
-            "LADDER": c(1, 0),
-            "LADDER_2": c(3, 0),
-            "ACCENT_PURPLE": c(2, 1),
-            "ACCENT_PURPLE_2": c(3, 1),
-            "CIRCLE_BUTTON": c(4, 0),
-            "TRIANGLE_WEDGE": c(4, 1),
-            "HALF_HAZARD": c(4, 9),
-            "HALF_HAZARD_2": c(7, 8),
-        })
-
-    # ------------------------------------------------------------
-    @property
-    def loaded(self):
-        return self._loaded
-
-    def get(self, name):
-        """Return a named tile surface, or None if unavailable."""
-        return self._named.get(name)
+    def get(self, name: str):
+        """Get a semantic alias or an actual tile name such as TILE_77."""
+        if name in self._named:
+            return self._named[name]
+        if name.startswith("TILE_"):
+            try:
+                return self.tile(int(name.split("_", 1)[1]))
+            except ValueError:
+                return None
+        return None
 
     def get_variant(self, names, index):
-        """Pick a deterministic variant from a list of tile names."""
-        valid = [self._named.get(n) for n in names if self._named.get(n)]
-        if not valid:
+        valid = [self.get(name) for name in names]
+        valid = [image for image in valid if image is not None]
+        return valid[index % len(valid)] if valid else None
+
+    def object(self, name: str):
+        return self.objects.get(name)
+
+    def background(self, name: str):
+        return self.backgrounds.get(name)
+
+    def background_layer(self, name: str, scale: int = 2):
+        """Return an integer-scaled cached layer (nearest-neighbour pixel art)."""
+        key = (name, int(scale))
+        if key not in self._scaled_backgrounds:
+            source = self.backgrounds.get(name)
+            if source is None:
+                return None
+            target_size = (source.get_width() * scale, source.get_height() * scale)
+            self._scaled_backgrounds[key] = pygame.transform.scale(source, target_size)
+        return self._scaled_backgrounds[key]
+
+    def animation_frame(self, name: str, tick_ms: int | None = None, frame_ms: int = 150):
+        frames = self.animations.get(name)
+        if not frames:
             return None
-        return valid[index % len(valid)]
+        if tick_ms is None:
+            tick_ms = pygame.time.get_ticks()
+        index = (int(tick_ms) // max(1, int(frame_ms))) % len(frames)
+        return frames[index]
 
 
 _tileset_instance = None
 
 
 def get_tileset():
-    """Return the process-wide IndustrialTileset, creating it once."""
+    """Return a process-wide asset cache; loading occurs only once."""
     global _tileset_instance
     if _tileset_instance is None:
         _tileset_instance = IndustrialTileset()

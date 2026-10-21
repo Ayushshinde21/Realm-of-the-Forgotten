@@ -100,6 +100,10 @@ class PlatformGenerator:
             - self.minimum_ground_platform_gap
         )
 
+        # Normal difficulty can reserve a clear starting corridor near the
+        # ground. Other difficulties leave this at zero and keep their layout.
+        self.safe_start_zone_width = 0
+
     # ==============================================
     # DIFFICULTY
     # ==============================================
@@ -342,8 +346,12 @@ class PlatformGenerator:
         # maximum safe distance.
 
         max_gap = min(
-            max_gap,
+            max(0, max_gap),
             self.max_jump_distance
+        )
+        min_gap = min(
+            max(0, min_gap),
+            max_gap
         )
 
         # ------------------------------------------
@@ -354,11 +362,11 @@ class PlatformGenerator:
             55 + difficulty * 8
         )
 
-        # Keep height change within safe jump range.
-
-        max_height_change = min(
-            max_height_change,
-            int(self.safe_jump_height)
+        # Keep height changes within safe jump range, while ensuring every
+        # randint(minimum, maximum) used by the pattern selector is valid.
+        max_height_change = max(
+            0,
+            min(max_height_change, int(self.safe_jump_height))
         )
 
         return (
@@ -398,10 +406,13 @@ class PlatformGenerator:
         # HEIGHT PATTERN
         # ==========================================
 
+        min_height_change = min(40, max_height_change)
+        min_high_low_change = min(50, max_height_change)
+
         if pattern == "staircase":
 
             height_change = random.randint(
-                40,
+                min_height_change,
                 max_height_change
             )
 
@@ -409,33 +420,21 @@ class PlatformGenerator:
 
             height_change = random.randint(
                 -max_height_change,
-                -40
+                -min_height_change
             )
 
         elif pattern == "zigzag":
 
             height_change = random.choice([
-                random.randint(
-                    40,
-                    max_height_change
-                ),
-                random.randint(
-                    -max_height_change,
-                    -40
-                )
+                random.randint(min_height_change, max_height_change),
+                random.randint(-max_height_change, -min_height_change)
             ])
 
         elif pattern == "high_low":
 
             height_change = random.choice([
-                random.randint(
-                    50,
-                    max_height_change
-                ),
-                random.randint(
-                    -max_height_change,
-                    -50
-                )
+                random.randint(min_high_low_change, max_height_change),
+                random.randint(-max_height_change, -min_high_low_change)
             ])
 
         else:
@@ -525,7 +524,10 @@ class PlatformGenerator:
         # START PLATFORM
         # ==========================================
 
-        current_x = 100
+        # Normal starts from a ground-level safe corridor (x=0..300). Place
+        # the first raised platform just beyond it so the spawn rectangle and
+        # an early enemy can never overlap the starting ledge.
+        current_x = max(100, int(self.safe_start_zone_width) + 20)
 
         current_y = (
             self.world_height - 160

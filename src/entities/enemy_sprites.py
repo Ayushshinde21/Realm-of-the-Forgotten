@@ -6,14 +6,19 @@ import pygame
 # ==================================================
 # SPRITE-DRIVEN ENEMIES (normal difficulty only)
 # ==================================================
-# These 6 enemy "sprite_key" types come with real animated sprite sheets
-# (idle/run/attack/hurt/death) instead of the vector-drawn shapes used by
-# the classic slime/fast/jumper/flyer/heavy types. They patrol normally
-# and only attack once they notice the player.
+# Sprite-driven enemies use cached idle/run/attack/hurt/death animations.
+# Normal difficulty uses the seven zombie variants below; Easy keeps its
+# separate slime/swordsman roster and Hard retains its original enemy mix.
+NORMAL_ZOMBIE_TYPES = (
+    "zombie_1", "zombie_2", "zombie_3", "zombie_4",
+    "wild_zombie", "zombie_man", "zombie_woman",
+)
+
 SPRITE_ENEMY_TYPES = (
     "worker", "soldier", "boxer", "minebot", "chopper", "hammerbot",
     "green_slime", "blue_slime", "red_slime",
     "swordsman_pink", "swordsman_silver", "swordsman_blue",
+    *NORMAL_ZOMBIE_TYPES,
 )
 
 SPRITE_ENEMY_CONFIG = {
@@ -76,6 +81,37 @@ SPRITE_ENEMY_CONFIG = {
         "target_h": 58, "style": "melee",
         "detect": 205, "act_range": 46, "cooldown": 80, "hit_frame": 3,
     },
+    # Normal difficulty's complete enemy roster uses the supplied zombie
+    # spritesheets. The variants share melee behavior but differ in height,
+    # detection, reach, and recovery to retain useful enemy variety.
+    "zombie_1": {
+        "target_h": 62, "style": "melee", "detect": 225,
+        "act_range": 47, "cooldown": 68, "hit_frame": 2,
+    },
+    "zombie_2": {
+        "target_h": 60, "style": "melee", "detect": 210,
+        "act_range": 44, "cooldown": 62, "hit_frame": 2,
+    },
+    "zombie_3": {
+        "target_h": 62, "style": "melee", "detect": 245,
+        "act_range": 50, "cooldown": 74, "hit_frame": 2,
+    },
+    "zombie_4": {
+        "target_h": 65, "style": "melee", "detect": 250,
+        "act_range": 54, "cooldown": 80, "hit_frame": 4,
+    },
+    "wild_zombie": {
+        "target_h": 64, "style": "melee", "detect": 270,
+        "act_range": 57, "cooldown": 58, "hit_frame": 2,
+    },
+    "zombie_man": {
+        "target_h": 63, "style": "melee", "detect": 235,
+        "act_range": 51, "cooldown": 66, "hit_frame": 2,
+    },
+    "zombie_woman": {
+        "target_h": 61, "style": "melee", "detect": 220,
+        "act_range": 47, "cooldown": 64, "hit_frame": 2,
+    },
 }
 
 ENEMY_ANIM_NAMES = ("idle", "run", "attack", "hurt", "death")
@@ -87,6 +123,41 @@ _ENEMY_ASSET_ROOT = os.path.join(
     "assets",
     "enemies"
 )
+_ZOMBIE_SHEETS_ROOT = os.path.join(_ENEMY_ASSET_ROOT, "zombie_sheets")
+_ZOMBIE_FRAME_ROOT = os.path.join(_ZOMBIE_SHEETS_ROOT, "frames")
+
+# Each supplied image is a horizontal spritesheet of square, transparent
+# frames. The aliases adapt the source pack's naming to the shared enemy AI.
+_ZOMBIE_SHEET_CONFIG = {
+    "zombie_1": ("urban_pack/Zombie_1", {
+        "idle": "Idle.png", "run": "Walk.png", "attack": "Attack.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "zombie_2": ("urban_pack/Zombie_2", {
+        "idle": "Idle.png", "run": "Walk.png", "attack": "Attack.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "zombie_3": ("urban_pack/Zombie_3", {
+        "idle": "Idle.png", "run": "Walk.png", "attack": "Attack.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "zombie_4": ("urban_pack/Zombie_4", {
+        "idle": "Idle.png", "run": "Walk.png", "attack": "Attack.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "wild_zombie": ("variety_pack/Wild Zombie", {
+        "idle": "Idle.png", "run": "Run.png", "attack": "Attack_1.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "zombie_man": ("variety_pack/Zombie Man", {
+        "idle": "Idle.png", "run": "Run.png", "attack": "Attack_1.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+    "zombie_woman": ("variety_pack/Zombie Woman", {
+        "idle": "Idle.png", "run": "Run.png", "attack": "Attack_1.png",
+        "hurt": "Hurt.png", "death": "Dead.png",
+    }),
+}
 
 
 def _enemy_frame_files(sprite_key, anim_name):
@@ -108,13 +179,95 @@ def _enemy_frame_files(sprite_key, anim_name):
     return [os.path.join(directory, f) for f in files]
 
 
-def _load_enemy_animations(sprite_key, target_h):
-    """Loads + scales every animation for a sprite-driven enemy type once,
-    caching the result so repeated spawns of the same type are cheap."""
+def _load_zombie_sheet_animations(sprite_key, target_h):
+    """Load and cache explicit zombie animation frames, with a sheet fallback."""
+    folder, anim_files = _ZOMBIE_SHEET_CONFIG[sprite_key]
+    animations = {}
+    target_h = max(1, int(target_h))
 
+    for anim_name in ENEMY_ANIM_NAMES:
+        filename = anim_files.get(anim_name)
+        if not filename:
+            animations[anim_name] = []
+            continue
+
+        frame_action = os.path.splitext(filename)[0]
+        frame_dir = os.path.join(_ZOMBIE_FRAME_ROOT, folder, frame_action)
+        frame_paths = []
+        if os.path.isdir(frame_dir):
+            frame_paths = [
+                os.path.join(frame_dir, name)
+                for name in os.listdir(frame_dir)
+                if name.startswith("frame_") and name.endswith(".png")
+            ]
+            frame_paths.sort(key=lambda name: int(os.path.basename(name).split("_")[1].split(".")[0]))
+
+        source_frames = []
+        if frame_paths:
+            for frame_path in frame_paths:
+                try:
+                    source_frames.append(pygame.image.load(frame_path).convert_alpha())
+                except (pygame.error, FileNotFoundError):
+                    continue
+        else:
+            # Compatibility fallback: slice the original horizontal sheet if
+            # explicit frame assets are missing (for example, older installs).
+            path = os.path.join(_ZOMBIE_SHEETS_ROOT, folder, filename)
+            try:
+                sheet = pygame.image.load(path).convert_alpha()
+            except (pygame.error, FileNotFoundError):
+                animations[anim_name] = []
+                continue
+
+            frame_size = sheet.get_height()
+            if frame_size <= 0 or sheet.get_width() < frame_size:
+                animations[anim_name] = []
+                continue
+
+            frame_count = sheet.get_width() // frame_size
+            for index in range(frame_count):
+                frame_rect = pygame.Rect(index * frame_size, 0, frame_size, frame_size)
+                frame = sheet.subsurface(frame_rect).copy()
+                source_frames.append(frame)
+
+        alpha_bounds = []
+        for frame in source_frames:
+            bounds = frame.get_bounding_rect(min_alpha=16)
+            if bounds.width and bounds.height:
+                alpha_bounds.append(bounds)
+
+        # Crop shared bounds per animation to remove transparent frame padding
+        # without making the character jump sideways between adjacent frames.
+        if not alpha_bounds:
+            animations[anim_name] = []
+            continue
+        left = min(bounds.left for bounds in alpha_bounds)
+        top = min(bounds.top for bounds in alpha_bounds)
+        right = max(bounds.right for bounds in alpha_bounds)
+        bottom = max(bounds.bottom for bounds in alpha_bounds)
+        crop_rect = pygame.Rect(left, top, right - left, bottom - top)
+        source_height = max(1, crop_rect.height)
+        target_width = max(1, round(crop_rect.width * target_h / source_height))
+
+        frames = []
+        for frame in source_frames:
+            cropped = frame.subsurface(crop_rect).copy()
+            frames.append(pygame.transform.scale(cropped, (target_width, target_h)))
+        animations[anim_name] = frames
+
+    return animations
+
+
+def _load_enemy_animations(sprite_key, target_h):
+    """Loads + scales animations once so repeated spawns stay inexpensive."""
     cache_key = (sprite_key, target_h)
     if cache_key in _ENEMY_FRAME_CACHE:
         return _ENEMY_FRAME_CACHE[cache_key]
+
+    if sprite_key in _ZOMBIE_SHEET_CONFIG:
+        animations = _load_zombie_sheet_animations(sprite_key, target_h)
+        _ENEMY_FRAME_CACHE[cache_key] = animations
+        return animations
 
     reference = _enemy_frame_files(sprite_key, "idle") or _enemy_frame_files(sprite_key, "run")
 
