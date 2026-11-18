@@ -4,11 +4,11 @@ import pygame
 
 
 # ==================================================
-# SPRITE-DRIVEN ENEMIES (normal difficulty only)
+# SPRITE-DRIVEN ENEMIES (World 2 only)
 # ==================================================
 # Sprite-driven enemies use cached idle/run/attack/hurt/death animations.
-# Normal difficulty uses the seven zombie variants below; Easy keeps its
-# separate slime/swordsman roster and Hard retains its original enemy mix.
+# World 2 uses the seven zombie variants below; World 1 keeps its separate
+# slime/swordsman enemy roster.
 NORMAL_ZOMBIE_TYPES = (
     "zombie_1", "zombie_2", "zombie_3", "zombie_4",
     "wild_zombie", "zombie_man", "zombie_woman",
@@ -54,7 +54,7 @@ SPRITE_ENEMY_CONFIG = {
         "detect": 250, "act_range": 62, "cooldown": 70, "hit_frame": 3,
     },
     # Animated slimes use the supplied pixel-art sheets. They are simpler,
-    # short-range enemies suited to Easy and the later Hard encounters.
+    # short-range enemies suited to World 1 and later campaign levels.
     "green_slime": {
         "target_h": 62, "style": "melee",
         "detect": 175, "act_range": 38, "cooldown": 78, "hit_frame": 2,
@@ -67,7 +67,7 @@ SPRITE_ENEMY_CONFIG = {
         "target_h": 66, "style": "melee",
         "detect": 215, "act_range": 46, "cooldown": 65, "hit_frame": 2,
     },
-    # Sword-wielding pixel heroes are additional Easy-only ground enemies.
+    # Sword-wielding pixel heroes are additional World 1 ground enemies.
     # Their cooldowns and attack reach are deliberately forgiving.
     "swordsman_pink": {
         "target_h": 54, "style": "melee",
@@ -81,7 +81,7 @@ SPRITE_ENEMY_CONFIG = {
         "target_h": 58, "style": "melee",
         "detect": 205, "act_range": 46, "cooldown": 80, "hit_frame": 3,
     },
-    # Normal difficulty's complete enemy roster uses the supplied zombie
+    # World 2's complete enemy roster uses the supplied zombie
     # spritesheets. The variants share melee behavior but differ in height,
     # detection, reach, and recovery to retain useful enemy variety.
     "zombie_1": {

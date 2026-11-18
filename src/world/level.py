@@ -3,7 +3,7 @@ import random
 import os
 import math
 
-from src.settings import WIDTH, HEIGHT, WORLD_WIDTH, WORLD_HEIGHT, MAX_LEVELS
+from src.settings import WIDTH, HEIGHT, WORLD_WIDTH, WORLD_HEIGHT, MAX_LEVELS, WORLD_NAMES
 from src.entities.player import Player
 from src.entities.platform import Platform
 from src.entities.moving_platform import MovingPlatform
@@ -11,9 +11,7 @@ from src.entities.collectible import Collectible
 from src.entities.checkpoint import Checkpoint
 from src.world.camera import Camera
 from src.world.platform_generator import PlatformGenerator
-from src.entities.obstacle import Obstacle
 from src.entities.thorn import ThornHazard
-from src.entities.bush import Bush
 from src.entities.enemy import (
     Enemy,
     SPRITE_ENEMY_TYPES,
@@ -26,7 +24,7 @@ from src.systems.save_system import save_game, load_game
 from src.effects.particle import Particle
 from src.entities.npc import NPC
 from src.systems.dialogue import Dialogue
-from src.world.level_data import LEVELS
+from src.world.level_data import LEVELS, world_for_level, campaign_progress
 from src.world.green_zone_renderer import (
     draw_green_zone_platform,
     draw_green_zone_ground,
@@ -45,11 +43,6 @@ from src.world.level_config import (  # noqa: F401
     PIT_FLOOR_OFFSET,
     QUEST_DEFINITIONS,
     ITEM_MIN_SPACING,
-    ROCK_MIN_SPACING,
-    BUSH_MIN_SPACING,
-    ROCKS_PER_1000,
-    BUSHES_PER_1000_MIN,
-    BUSHES_PER_1000_MAX,
 )
 
 
@@ -85,11 +78,12 @@ _COIN_FRAME_CACHE = None
 
 class Level:
 
-    def __init__(self, seed=None, level_number=1, sound_manager=None, difficulty="normal"):
+    def __init__(self, seed=None, level_number=1, sound_manager=None):
 
         super().__init__()
-        self.level_number = level_number
-        self.difficulty = str(difficulty).lower() if str(difficulty).lower() in ("easy", "normal", "hard") else "normal"
+        self.level_number = max(1, min(MAX_LEVELS, int(level_number)))
+        self.world_number, self.world_level_number, self.difficulty = world_for_level(self.level_number)
+        self.world_name = WORLD_NAMES[self.world_number]
         self.start_time = pygame.time.get_ticks()
         self.elapsed_seconds = 0.0
         self.damage_taken = False
@@ -98,16 +92,13 @@ class Level:
         self.star_breakdown = None
         self.fail_requested = False
 
-        # Levels are looked up per-difficulty: LEVELS[difficulty][level_number].
-        # Each difficulty has its own independent set of MAX_LEVELS levels.
-        difficulty_levels = LEVELS.get(self.difficulty, LEVELS["normal"])
-        self.level_config = dict(difficulty_levels.get(
-            level_number,
-            difficulty_levels[1]
-        ))
-        self.is_boss_level = self.difficulty == "easy" and level_number in (5, 10)
-        self.boss_kind = "orc" if self.is_boss_level and level_number == 5 else (
-            "yokai" if self.is_boss_level and level_number == 10 else None
+        # Global levels 1-10 use World 1's former Easy profile; levels 11-20
+        # use World 2's former Normal profile with a local level index.
+        difficulty_levels = LEVELS[self.difficulty]
+        self.level_config = dict(difficulty_levels[self.world_level_number])
+        self.is_boss_level = self.world_number == 1 and self.world_level_number in (5, 10)
+        self.boss_kind = "orc" if self.is_boss_level and self.world_level_number == 5 else (
+            "yokai" if self.is_boss_level and self.world_level_number == 10 else None
         )
         self.boss = None
         if self.is_boss_level:
@@ -117,7 +108,7 @@ class Level:
             self.level_config["finish_x"] = arena_width - 160
 
         self.level_name = self.level_config["name"]
-        self.level_difficulty = self.level_config["difficulty"]
+        self.level_difficulty = self.world_name
         self.world_width = self.level_config["world_width"]
         self.finish_x = self.level_config["finish_x"]
 
@@ -126,31 +117,24 @@ class Level:
         # levels give proportionally more time to earn the time star.
         self.time_limit_seconds = 60 + 30 * (self.world_width // 2500)
 
-        # Enemy-hit tracking is separate from damage_taken (which also
-        # covers bush/rock hazards) so the "no enemy hits" star can be
-        # judged purely on enemy contact, per the star rules.
+        # Enemy-hit tracking is separate from damage_taken so the "no enemy hits"
+        # star is judged purely on enemy contact, per the star rules.
         self.enemy_hit_taken = False
 
-        # Level-specific platform difficulty ramps smoothly from level 1
-        # to MAX_LEVELS instead of being hardcoded to 3 fixed levels.
-        level_progress = (self.level_number - 1) / max(1, MAX_LEVELS - 1)
+        # Platform challenge increases continuously from campaign level 1
+        # through level 20, including the transition between the two worlds.
+        level_progress = campaign_progress(self.level_number)
         if level_progress < 0.34:
             self.platform_difficulty = "easy"
         elif level_progress < 0.67:
             self.platform_difficulty = "medium"
         else:
-            self.platform_difficulty = "hard"
+            self.platform_difficulty = "advanced"
 
-        # Player-selected difficulty controls world generation and enemy behavior.
-        if self.difficulty == "easy":
-            self.enemy_spawn_multiplier = 0.70
-            self.enemy_speed_multiplier = 0.90
-        elif self.difficulty == "hard":
-            self.enemy_spawn_multiplier = 1.15
-            self.enemy_speed_multiplier = 1.35
-        else:
-            self.enemy_spawn_multiplier = 1.0
-            self.enemy_speed_multiplier = 1.0
+        # Enemy pressure also ramps with the global campaign level. World 2
+        # has the tougher zombie roster in addition to this gradual increase.
+        self.enemy_spawn_multiplier = 0.70 + level_progress * 0.30
+        self.enemy_speed_multiplier = 0.90 + level_progress * 0.10
 
         self.sound_manager = sound_manager
 
@@ -177,8 +161,8 @@ class Level:
         # ==========================================
         # RANDOM BACKGROUND
         # ==========================================
-        # Normal uses the supplied Green Zone's layered forest renderer. Easy
-        # and Hard keep the existing static background system unchanged.
+        # World 2 uses the supplied Green Zone's layered forest renderer.
+        # World 1 keeps the existing static background system unchanged.
         if self.difficulty == "normal":
             self.background_path = None
             self.background_image = None
@@ -228,14 +212,9 @@ class Level:
 
         self.generator = PlatformGenerator(self.width, world_height=self.world_height)
 
-        # Normal keeps its doubled platforms. Easy platforms are lengthened
-        # by 35% to support safer traversal and the new continuous coin paths.
-        # Hard keeps its existing geometry unchanged.
-        self.generator.platform_size_multiplier = (
-            2.0 if self.difficulty == "normal"
-            else 1.35 if self.difficulty == "easy"
-            else 1.0
-        )
+        # World 2 keeps its doubled platforms. World 1 platforms are
+        # lengthened by 35% for safer traversal and continuous coin paths.
+        self.generator.platform_size_multiplier = 2.0 if self.difficulty == "normal" else 1.35
         self.generator.minimum_ground_platform_gap = (
             80 if self.difficulty == "normal" else 75
         )
@@ -245,16 +224,9 @@ class Level:
         )
         self.generator.safe_start_zone_width = 300 if self.difficulty == "normal" else 0
 
-        # Ramp difficulty across a difficulty's 1..MAX_LEVELS progression
-        # (level_progress: 0.0 at level 1, 1.0 at level MAX_LEVELS), then
-        # apply the player-selected difficulty as a further multiplier/offset.
-        level_progress = (self.level_number - 1) / max(1, MAX_LEVELS - 1)
-        if self.difficulty == "easy":
-            self.generator.base_difficulty = 0.5 + level_progress * 1.0
-        elif self.difficulty == "hard":
-            self.generator.base_difficulty = 1.5 + level_progress * 2.0
-        else:
-            self.generator.base_difficulty = 0.8 + level_progress * 1.4
+        # Generator difficulty follows the entire 20-level campaign rather
+        # than resetting when the player enters World 2.
+        self.generator.base_difficulty = 0.5 + level_progress * 1.9
 
         if self.is_boss_level:
             # Boss arenas have the ground and four spaced stepping platforms.
@@ -270,9 +242,8 @@ class Level:
         # ==========================================
 
         self.moving_platforms = []
-        # Easy and Hard keep their established moving-platform locations and
-        # construction order. Normal places them later, after pits and its
-        # reserved finish approach are known.
+        # World 1 keeps its established moving-platform layout. World 2
+        # places moving platforms after pits and the finish approach are known.
         if self.difficulty != "normal":
             self.generate_moving_platforms()
 
@@ -303,7 +274,7 @@ class Level:
         self.player = Player(
             self.player_start_x,
             self.player_start_y,
-            character_type=("fighter" if self.difficulty == "easy" else "gangster2" if self.difficulty == "normal" else "default"),
+            character_type="fighter" if self.world_number == 1 else "gangster2",
         )
         if self.is_boss_level:
             self.player.jump_strength = -17.0
@@ -316,9 +287,8 @@ class Level:
 
         self.collectibles = []
 
-        # Preserve the existing Normal/Hard collectible timing. Easy coins
-        # are generated after enemies and checkpoints exist, so their paths
-        # can be placed outside enemy patrol and checkpoint collision areas.
+        # World 2 keeps its original collectible timing. World 1 coins are
+        # generated after enemies and checkpoints so trails avoid collisions.
         if self.difficulty != "easy":
             self.generate_collectibles()
 
@@ -387,16 +357,6 @@ class Level:
         self.enemies = []
         self.projectiles = []
         self.generate_enemies()
-
-        # ==========================================
-        # OBSTACLES
-        # ==========================================
-
-        self.obstacles = []
-        self.bushes = []
-
-        self.generate_obstacles()
-        self.generate_bushes()
 
         if self.difficulty == "easy":
             self.generate_collectibles()
@@ -636,7 +596,7 @@ class Level:
             ]
             return target
 
-        # Legacy Easy/Hard finish selection remains unchanged.
+        # World 1's finish selection retains its established safe placement.
         target = int(self.finish_x)
 
         # The final checkpoint is drawn at 120x120 and its bottom sits on
@@ -704,8 +664,6 @@ class Level:
             getattr(self, "collectibles", []),
             getattr(self, "checkpoints", []),
             getattr(self, "enemies", []),
-            getattr(self, "obstacles", []),
-            getattr(self, "bushes", []),
             getattr(self, "thorns", []),
         ):
             for item in group:
@@ -766,7 +724,7 @@ class Level:
             )
 
         static_hazards = []
-        for group_name in ("checkpoints", "obstacles", "bushes", "thorns"):
+        for group_name in ("checkpoints", "thorns"):
             for item in getattr(self, group_name, []):
                 rect = getattr(item, "rect", None)
                 if rect is not None:
@@ -886,8 +844,8 @@ class Level:
         if getattr(self, "is_boss_level", False):
             return
 
-        # Keep Easy/Hard checkpoint selection unchanged; the resilient nearby
-        # candidate/fallback behavior below is specific to Normal difficulty.
+        # World 1 keeps its established checkpoint layout. World 2 uses the
+        # resilient nearby-candidate and fallback placement rules below.
         if self.difficulty != "normal":
             checkpoint_spacing = 3000
             next_checkpoint_x = checkpoint_spacing
@@ -1322,7 +1280,7 @@ class Level:
             self._generate_normal_moving_platforms()
             return
 
-        # Preserve the previous fixed moving-platform layout for Easy/Hard.
+        # World 1 keeps its previous fixed moving-platform layout.
         vertical_offset = self.world_height - HEIGHT
         positions = [
             (1800, 420 + vertical_offset, "horizontal"),
@@ -1523,7 +1481,7 @@ class Level:
     #   - Completed the level                     (always required/true on win)
     #   - 2 quests randomly chosen (per level, via self.active_quests) from:
     #       - Killed every enemy in the level
-    #       - Finished without getting hit by an enemy (bushes/rocks are fine)
+    #       - Finished without getting hit by an enemy
     #       - Collected every coin in the level
     #       - Finished within the level's time limit
     #
@@ -1552,7 +1510,7 @@ class Level:
             ),
             "no_enemy_hits": (
                 no_enemy_hits,
-                "No enemy hits (bushes/rocks OK)",
+                "No enemy hits",
             ),
             "collected_all_coins": (
                 collected_all_coins,
@@ -1728,35 +1686,8 @@ class Level:
             self.player.rect.right = min(self.width, self.player.rect.right)
 
         # ------------------------------------------
-        # ROCK COLLISION / DAMAGE
+        # THORN EFFECTS
         # ------------------------------------------
-        # Rocks are ground hazards only. They are never part of the
-        # platform collision list, so the player cannot stand on them.
-
-        for obstacle in self.obstacles:
-
-            if not obstacle.active or not obstacle.check_collision(self.player):
-                continue
-
-            if self.damage_cooldown > 0:
-                continue
-
-            self.player.health = max(0, self.player.health - 1)
-            self.damage_taken = True
-            self.damage_cooldown = self.damage_cooldown_max
-            self.player.take_damage()
-
-            if self.player.rect.centerx < obstacle.rect.centerx:
-                self.player.rect.right = obstacle.rect.left
-            else:
-                self.player.rect.left = obstacle.rect.right
-
-            self.player.velocity_y = -5
-
-        # ------------------------------------------
-        # BUSH AND THORN EFFECTS
-        # ------------------------------------------
-        self.update_bush_effects()
         self._update_thorn_effects()
         # ------------------------------------------
         # DEATH
@@ -1936,7 +1867,7 @@ class Level:
                 self.width,
                 self.ground.rect.top,
                 seed=self.seed,
-                level_number=self.level_number,
+                level_number=self.world_level_number,
             )
         elif self.background_image is not None:
             screen.blit(
@@ -2056,23 +1987,6 @@ class Level:
                 )
             )
         # ==========================================
-        # OBSTACLES
-        # ==========================================
-
-        for obstacle in self.obstacles:
-            obstacle.draw(
-                screen,
-                self.camera
-            )
-
-        # ==========================================
-        # BUSHES
-        # ==========================================
-
-        for bush in self.bushes:
-            bush.draw(screen, self.camera)
-
-        # ==========================================
         # MOVING PLATFORMS
         # ==========================================
 
@@ -2174,8 +2088,8 @@ class Level:
                     5
                 )
 
-        # Normal-only decorative props: this renderer reads the existing
-        # world rectangles and never adds collision or damage behavior.
+        # World 2 decorative props are visual-only and never add collisions
+        # or damage behavior.
         if self.difficulty == "normal":
             draw_green_zone_decorations(
                 screen,
@@ -2185,7 +2099,7 @@ class Level:
                 self.platforms[1:],
                 self.pits,
                 seed=self.seed,
-                level_number=self.level_number,
+                level_number=self.world_level_number,
                 finish_x=self.finish_x,
             )
 
@@ -2384,7 +2298,7 @@ class Level:
         )
 
         difficulty_surface = small_font.render(
-            f"Difficulty: {self.level_difficulty}",
+            f"WORLD {self.world_number}: {self.level_difficulty}",
             True,
             (80, 80, 80)
         )
@@ -2847,9 +2761,8 @@ class Level:
             self.enemies.append(self.boss)
             return
 
-        # Easy uses a world-distance density rule rather than independent
-        # per-platform random rolls. Normal and Hard continue through the
-        # existing generation code unchanged.
+        # World 1 uses world-distance enemy density. World 2 uses the
+        # existing per-platform generator and its zombie roster.
         if self.difficulty == "easy":
             self._generate_easy_enemies_by_density()
             return
@@ -2990,24 +2903,15 @@ class Level:
 
             sprite_key = None
 
-            if enemy_type == "slime" and self.difficulty in ("easy", "hard"):
-                if self.difficulty == "easy":
-                    sprite_key = random.choices(
-                        [
-                            "green_slime", "blue_slime", "red_slime",
-                            "swordsman_pink", "swordsman_silver", "swordsman_blue",
-                        ],
-                        # Keep the existing slime ratio within its 70% share;
-                        # the new sword enemies make up the remaining 30%.
-                        weights=[0.42, 0.21, 0.07, 0.10, 0.10, 0.10],
-                        k=1,
-                    )[0]
-                else:
-                    sprite_key = random.choices(
-                        ["green_slime", "blue_slime", "red_slime"],
-                        weights=[0.20, 0.35, 0.45],
-                        k=1,
-                    )[0]
+            if enemy_type == "slime" and self.difficulty == "easy":
+                sprite_key = random.choices(
+                    [
+                        "green_slime", "blue_slime", "red_slime",
+                        "swordsman_pink", "swordsman_silver", "swordsman_blue",
+                    ],
+                    weights=[0.42, 0.21, 0.07, 0.10, 0.10, 0.10],
+                    k=1,
+                )[0]
 
             if self.difficulty == "normal":
                 # Normal's roster is replaced completely by animated zombies.
@@ -3205,194 +3109,6 @@ class Level:
 
 
 
-    # ==============================================
-    # GENERATE GROUND ROCKS
-    # ==============================================
-
-    def generate_obstacles(self):
-        """Generate exactly 2 rocks per 1000 world pixels on solid ground.
-
-        Rocks are independent from bushes and are never placed on platforms,
-        inside pits, or inside the protected final approach.
-        """
-        self.obstacles.clear()
-
-        # Easy and Normal have no rocks; Hard retains its existing rocks.
-        if self.difficulty in ("easy", "normal"):
-            return
-
-        ground_top = self.ground.rect.top
-        final_start = getattr(self, "final_approach_start", self.width)
-        playable_end = max(0, min(self.width, final_start - 70))
-
-        if playable_end <= 200:
-            return
-
-        # Split the usable world into 1000-pixel zones. Each complete zone
-        # receives exactly two rocks. A short final zone also receives two
-        # when there is enough room for safe placement.
-        zone_starts = list(range(0, playable_end, 1000))
-
-        for zone_start in zone_starts:
-            zone_end = min(zone_start + 1000, playable_end)
-            if zone_end - zone_start < 300:
-                continue
-
-            created = 0
-            attempts = 0
-
-            while created < ROCKS_PER_1000 and attempts < 500:
-                attempts += 1
-                width = random.randint(35, 50)
-                height = random.randint(30, 45)
-                margin = 80
-
-                left = zone_start + margin
-                right = zone_end - margin - width
-                if right <= left:
-                    continue
-
-                x = random.randint(left, right)
-                rect = pygame.Rect(x, ground_top - height, width, height)
-
-                # Never place a rock in a pit.
-                if any(rect.inflate(24, 0).colliderect(pit) for pit in self.pits):
-                    continue
-
-                # Keep rocks separated from every other gameplay item.
-                if any(abs(rect.centerx - o.rect.centerx) < ROCK_MIN_SPACING for o in self.obstacles):
-                    continue
-
-                # Rocks have their own large spacing rule. Other item types do
-                # not prevent a rock from being generated.
-                if any(abs(rect.centerx - getattr(item, "rect").centerx) < 80
-                       for item in getattr(self, "collectibles", [])):
-                    continue
-
-                self.obstacles.append(
-                    Obstacle(
-                        x,
-                        ground_top - height,
-                        width,
-                        height,
-                        "rock"
-                    )
-                )
-                created += 1
-
-    def generate_bushes(self):
-        """Generate bushes on platforms with strict spacing rules.
-
-        Rules:
-        - At most ONE bush per platform.
-        - Two consecutive platforms can never both have bushes.
-        - Bushes are placed only on normal platforms, never on ground.
-        - Target density remains 4-5 bushes per 1000 world pixels when the
-          available platform layout allows it.
-        """
-        self.bushes.clear()
-
-        # Easy and Normal have no bushes; Hard retains its existing bushes.
-        if self.difficulty in ("easy", "normal"):
-            return
-
-        final_start = getattr(self, "final_approach_start", self.width)
-        playable_end = max(0, min(self.width, final_start - 70))
-
-        bush_types = [Bush.SLOW, Bush.FAST, Bush.POISON]
-        weights = [0.40, 0.35, 0.25]
-
-        # Keep only regular generated platforms. Ground is excluded.
-        platform_candidates = [
-            (index, platform)
-            for index, platform in enumerate(self.platforms[1:], start=1)
-            if platform.rect.width >= 75
-            and platform.rect.centerx < playable_end
-        ]
-
-        selected_platform_indices = set()
-
-        for zone_start in range(0, playable_end, 1000):
-            zone_end = min(zone_start + 1000, playable_end)
-            if zone_end - zone_start < 300:
-                continue
-
-            target_count = random.randint(
-                BUSHES_PER_1000_MIN, BUSHES_PER_1000_MAX
-            )
-
-            # Use the platform center for zone ownership. This prevents one
-            # platform from being selected again when it crosses a zone edge.
-            candidates = [
-                (index, platform)
-                for index, platform in platform_candidates
-                if zone_start <= platform.rect.centerx < zone_end
-                and index not in selected_platform_indices
-            ]
-            random.shuffle(candidates)
-
-            created = 0
-            for index, platform in candidates:
-                if created >= target_count:
-                    break
-
-                # Exactly one bush per platform, and never on consecutive
-                # platforms. Check both neighboring generated platforms.
-                if index - 1 in selected_platform_indices:
-                    continue
-                if index + 1 in selected_platform_indices:
-                    continue
-
-                width = random.randint(24, 30)
-                height = random.randint(26, 32)
-                margin = 12
-
-                usable_left = max(platform.rect.left + margin, zone_start + 15)
-                usable_right = min(
-                    platform.rect.right - margin - width,
-                    zone_end - 15 - width
-                )
-                if usable_right <= usable_left:
-                    continue
-
-                x = random.randint(usable_left, usable_right)
-                center_x = x + width // 2
-                bush_rect = pygame.Rect(
-                    x,
-                    platform.rect.top - height,
-                    width,
-                    height,
-                )
-
-                # Keep bushes apart even when they are on non-consecutive
-                # platforms, so the world does not look cluttered.
-                if any(
-                    abs(center_x - b.rect.centerx) < BUSH_MIN_SPACING
-                    for b in self.bushes
-                ):
-                    continue
-
-                bush_type = random.choices(
-                    bush_types,
-                    weights=weights,
-                    k=1,
-                )[0]
-
-                self.bushes.append(
-                    Bush(
-                        x,
-                        platform.rect.top,
-                        bush_type,
-                        width,
-                        height,
-                        variant=random.randint(0, 4),
-                        platform=platform,
-                    )
-                )
-
-                selected_platform_indices.add(index)
-                created += 1
-
     def _touching_thorns(self):
         return [
             thorn
@@ -3407,6 +3123,7 @@ class Level:
             self.player.speed = self.player.base_speed / THORN_SLOW_FACTOR
             self.player.jump_strength = self.base_player_jump_strength / THORN_SLOW_FACTOR
         else:
+            self.player.speed = self.player.base_speed
             self.player.jump_strength = self.base_player_jump_strength
 
     def _update_thorn_effects(self):
@@ -3432,42 +3149,6 @@ class Level:
                 (120, 190, 56),
                 count=5,
             )
-
-    def update_bush_effects(self):
-        current_x = self.player.rect.centerx
-        previous_x = getattr(self.player, "previous_center_x", current_x)
-        speed_modifier = 1.0
-
-        for bush in self.bushes:
-            if not bush.active:
-                continue
-            touching = self.player.rect.colliderect(bush.rect)
-
-            if bush.bush_type == Bush.SLOW and touching:
-                speed_modifier = min(speed_modifier, 0.55)
-            elif bush.bush_type == Bush.FAST and touching:
-                speed_modifier = max(speed_modifier, 1.55)
-            elif bush.bush_type == Bush.POISON:
-                # Poison ONLY damages a player who walks across the bush while
-                # grounded. Jumping through or touching from above is harmless.
-                walking_through = (
-                    self.player.on_ground
-                    and abs(current_x - previous_x) > 0
-                    and ((previous_x < bush.rect.centerx <= current_x)
-                         or (previous_x > bush.rect.centerx >= current_x))
-                )
-                if walking_through and not bush.triggered:
-                    bush.triggered = True
-                    if self.damage_cooldown <= 0:
-                        self.player.health = max(0, self.player.health - 1)
-                        self.damage_taken = True
-                        self.damage_cooldown = self.damage_cooldown_max
-                        self.player.take_damage()
-                        self.create_particles(bush.rect.centerx, bush.rect.centery, (120, 220, 70), count=10)
-                if not touching and abs(current_x - bush.rect.centerx) > bush.rect.width:
-                    bush.triggered = False
-
-        self.player.speed = self.player.base_speed * speed_modifier
 
     def handle_player_attack(self):
 

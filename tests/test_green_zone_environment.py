@@ -74,18 +74,19 @@ def test_tree_stone_fountain_and_animation_references_exist_and_are_valid():
     assert money_frames[0] // 24 == 6
 
 
-def test_all_ten_normal_levels_remain_configured():
+def test_twenty_level_campaign_keeps_ten_world_two_slots_configured():
     import sys
     sys.path.insert(0, str(PROJECT_ROOT))
     from src.settings import MAX_LEVELS
     from src.world.level_data import LEVELS
 
-    assert MAX_LEVELS == 10
+    assert MAX_LEVELS == 20
     assert tuple(LEVELS["normal"]) == tuple(range(1, 11))
+    assert all(level["world_number"] == 2 for level in LEVELS["normal"].values())
     assert all(level["difficulty"] == "Normal" for level in LEVELS["normal"].values())
 
 
-def test_normal_draw_branches_use_green_zone_only_and_keep_easy_hard_separate():
+def test_world_renderers_remain_separate():
     source = LEVEL_SOURCE.read_text(encoding="utf-8")
     tree = ast.parse(source)
     level_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Level")
@@ -112,10 +113,10 @@ def test_green_zone_renderer_is_visual_only_and_decor_layout_is_seeded():
     assert "colliderect" in source
 
 
-def test_old_industrial_normal_assets_and_modules_are_no_longer_required():
-    assert not (PROJECT_ROOT / "assets" / "tilesets" / "industrial_zone").exists()
-    assert not (PROJECT_ROOT / "src" / "world" / "industrial_renderer.py").exists()
-    assert not (PROJECT_ROOT / "src" / "world" / "industrial_tileset.py").exists()
+def test_legacy_industrial_assets_are_not_used_by_the_world_renderers():
+    level_source = LEVEL_SOURCE.read_text(encoding="utf-8")
+    assert "industrial_zone" not in level_source
+    assert "draw_industrial_" not in level_source
 
 def test_moving_platform_texture_moves_with_its_platform():
     source = RENDERER_SOURCE.read_text(encoding="utf-8")

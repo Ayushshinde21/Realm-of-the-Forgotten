@@ -34,7 +34,7 @@ def test_easy_regular_level_uses_thorns_instead_of_pits_and_applies_damage():
     from src.world.level import Level, THORN_SLOW_FACTOR
 
     try:
-        level = Level(seed=81273, level_number=1, difficulty="easy")
+        level = Level(seed=81273, level_number=1)
         assert not level.pits
         assert level.thorns
 
@@ -54,10 +54,9 @@ def test_easy_regular_level_uses_thorns_instead_of_pits_and_applies_damage():
 
         assert level.player.health == health_before - 2
 
-        normal = Level(seed=81273, level_number=1, difficulty="normal")
-        hard = Level(seed=81273, level_number=1, difficulty="hard")
-        assert not normal.thorns
-        assert not hard.thorns
+        world_two = Level(seed=81273, level_number=11)
+        assert world_two.difficulty == "normal"
+        assert not world_two.thorns
     finally:
         pygame.quit()
 

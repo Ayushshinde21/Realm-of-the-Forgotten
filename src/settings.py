@@ -18,13 +18,16 @@ CAMERA_DEADZONE_Y = 90
 
 VERSION = "1.0.0"
 
-# Difficulty used before the player picks one. The chosen difficulty is kept
-# on the Game object and passed explicitly (no global that changes at runtime).
-DEFAULT_DIFFICULTY = "normal"
-
-# Number of playable levels per difficulty (see level_data.py). Each of
-# easy/normal/hard has its own independent set of MAX_LEVELS levels.
-MAX_LEVELS = 10
+# The campaign is one continuous progression split into two worlds.
+# World 1 uses the former Easy content (levels 1-10); World 2 uses the
+# former Normal content (levels 11-20). Difficulty is selected automatically
+# from the global level number rather than from a separate menu.
+WORLD_LEVEL_COUNT = 10
+MAX_LEVELS = WORLD_LEVEL_COUNT * 2
+WORLD_NAMES = {
+    1: "Snackland Meadows",
+    2: "Greenwild Frontier",
+}
 
 # Score thresholds for star ratings: below the first value = 1 star,
 # below the second value = 2 stars, otherwise 3 stars.

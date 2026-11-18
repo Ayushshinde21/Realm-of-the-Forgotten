@@ -3,29 +3,21 @@ import logging
 import os
 
 from src import paths
+from src.settings import MAX_LEVELS, WORLD_LEVEL_COUNT
 from src.systems.achievements import evaluate, default_state
-from src.settings import MAX_LEVELS
 from src.systems import session
 
 log = logging.getLogger("veggiequest.save")
 
-# Bump this when the save layout changes and add a step to _migrate().
-SAVE_VERSION = 1
+# Save version 2 replaces independent difficulty progress with one campaign
+# progress track covering all twenty levels.
+SAVE_VERSION = 2
 
-DIFFICULTIES = ("easy", "normal", "hard")
 
-
-def _default_difficulty_progress():
-    """Progress is tracked separately per difficulty: each of easy/normal/
-    hard has its own independent set of unlocked levels, stars, and
-    in-progress checkpoints, so clearing Level 1 on one difficulty never
-    unlocks or affects Level 1 on another difficulty."""
+def _default_progress():
     return {
         "unlocked_levels": [1],
         "level_stars": {},
-        # Per-level in-progress checkpoint, keyed by level number as a
-        # string. This is what previously leaked between levels when it
-        # was stored as a single global value.
         "checkpoints": {},
     }
 
@@ -33,15 +25,10 @@ def _default_difficulty_progress():
 def _default_data():
     return {
         "version": SAVE_VERSION,
-        "difficulties": {d: _default_difficulty_progress() for d in DIFFICULTIES},
+        "progress": _default_progress(),
         "total_collectibles": 0,
         "achievements": default_state(),
     }
-
-
-def _normalize_difficulty(difficulty):
-    d = str(difficulty).lower()
-    return d if d in DIFFICULTIES else "normal"
 
 
 def _safe_filename(username):
@@ -49,25 +36,128 @@ def _safe_filename(username):
 
 
 def _save_path(username=None):
-    """Resolves the save file path for a username (defaults to the
-    currently logged-in user). Returns None if no user is available,
-    so callers can no-op instead of touching a shared file."""
+    """Resolve the current user's save path, or return None when logged out."""
     username = username or session.get_current_user()
     if not username:
         return None
     return str(paths.save_dir() / f"{_safe_filename(username)}.json")
 
 
+def _valid_level_number(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 1 <= number <= MAX_LEVELS else None
+
+
+def _copy_legacy_world(progress, legacy, offset, skip_default_only=False):
+    """Copy one legacy 1-10 difficulty track into the unified 20-level track."""
+    if not isinstance(legacy, dict):
+        return
+
+    unlocked = legacy.get("unlocked_levels", [1])
+    stars = legacy.get("level_stars", {})
+    checkpoints = legacy.get("checkpoints", {})
+    if not isinstance(unlocked, list):
+        unlocked = [1]
+    if not isinstance(stars, dict):
+        stars = {}
+    if not isinstance(checkpoints, dict):
+        checkpoints = {}
+
+    has_real_progress = (
+        any(_valid_level_number(value) not in (None, 1) for value in unlocked)
+        or bool(stars)
+        or bool(checkpoints)
+    )
+    if skip_default_only and not has_real_progress:
+        return
+
+    for value in unlocked:
+        local_level = _valid_level_number(value)
+        if local_level is not None and local_level <= WORLD_LEVEL_COUNT:
+            progress["unlocked_levels"].append(local_level + offset)
+
+    for key, value in stars.items():
+        local_level = _valid_level_number(key)
+        if local_level is not None and local_level <= WORLD_LEVEL_COUNT:
+            progress["level_stars"][str(local_level + offset)] = max(0, min(3, int(value)))
+
+    for key, value in checkpoints.items():
+        local_level = _valid_level_number(key)
+        if local_level is not None and local_level <= WORLD_LEVEL_COUNT:
+            progress["checkpoints"][str(local_level + offset)] = value
+
+
 def _migrate(data):
-    """Upgrade an older save dict to SAVE_VERSION. Saves written before the
-    version field existed count as version 0 and already have the current
-    layout, so they only need the number stamped on them."""
+    """Upgrade legacy per-difficulty saves to the two-world campaign format."""
+    if not isinstance(data, dict):
+        data = {}
+
     version = data.get("version", 0)
     if not isinstance(version, int):
         version = 0
-    # Future upgrades go here, e.g.:  if version < 2: ...; version = 2
-    data["version"] = SAVE_VERSION
-    return data
+
+    progress = data.get("progress")
+    if version < 2 or not isinstance(progress, dict):
+        legacy_difficulties = data.get("difficulties", {})
+        if not isinstance(legacy_difficulties, dict):
+            legacy_difficulties = {}
+
+        progress = _default_progress()
+        # Former Easy progress becomes World 1 (global levels 1-10).
+        _copy_legacy_world(progress, legacy_difficulties.get("easy"), 0)
+        # Former Normal progress becomes World 2 (global levels 11-20).
+        # A never-played default [1] entry does not prematurely unlock World 2.
+        _copy_legacy_world(
+            progress,
+            legacy_difficulties.get("normal"),
+            WORLD_LEVEL_COUNT,
+            skip_default_only=True,
+        )
+
+    unlocked = progress.get("unlocked_levels", [1])
+    stars = progress.get("level_stars", {})
+    checkpoints = progress.get("checkpoints", {})
+    if not isinstance(unlocked, list):
+        unlocked = [1]
+    if not isinstance(stars, dict):
+        stars = {}
+    if not isinstance(checkpoints, dict):
+        checkpoints = {}
+
+    clean_unlocked = {1}
+    for value in unlocked:
+        number = _valid_level_number(value)
+        if number is not None:
+            clean_unlocked.add(number)
+
+    clean_stars = {}
+    for key, value in stars.items():
+        number = _valid_level_number(key)
+        if number is None:
+            continue
+        try:
+            clean_stars[str(number)] = max(0, min(3, int(value)))
+        except (TypeError, ValueError):
+            continue
+
+    clean_checkpoints = {}
+    for key, value in checkpoints.items():
+        number = _valid_level_number(key)
+        if number is not None and isinstance(value, dict):
+            clean_checkpoints[str(number)] = value
+
+    migrated = dict(data)
+    migrated["version"] = SAVE_VERSION
+    migrated["progress"] = {
+        "unlocked_levels": sorted(clean_unlocked),
+        "level_stars": clean_stars,
+        "checkpoints": clean_checkpoints,
+    }
+    migrated.pop("difficulties", None)
+    return migrated
 
 
 def _read(username=None):
@@ -85,42 +175,28 @@ def _read(username=None):
 
     merged = _default_data()
     merged.update(_migrate(data))
-
-    # Make sure every difficulty always has a complete progress dict, even
-    # if the save file is from before this structure existed or is missing
-    # a difficulty entry.
-    diffs = merged.get("difficulties")
-    if not isinstance(diffs, dict):
-        diffs = {}
-    for d in DIFFICULTIES:
-        prog = dict(_default_difficulty_progress())
-        prog.update(diffs.get(d) or {})
-        diffs[d] = prog
-    merged["difficulties"] = diffs
     return merged
 
 
 def save_game(level, unlock_next=False, completed=False, username=None):
     path = _save_path(username)
     if not path:
-        return  # no logged-in user - nothing to save to
+        return
 
     existing_data = _read(username)
-    difficulty = _normalize_difficulty(getattr(level, "difficulty", "normal"))
-    diffs = existing_data["difficulties"]
-    prog = diffs[difficulty]
+    progress = existing_data["progress"]
 
-    unlocked_levels = prog.get("unlocked_levels", [1])
-    if 1 not in unlocked_levels: unlocked_levels.insert(0, 1)
-    if unlock_next and level.level_number < MAX_LEVELS:
-        nxt = level.level_number + 1
-        if nxt not in unlocked_levels: unlocked_levels.append(nxt)
+    unlocked_levels = set(progress.get("unlocked_levels", [1]))
+    unlocked_levels.add(1)
+    level_number = _valid_level_number(getattr(level, "level_number", 1)) or 1
+    if unlock_next and level_number < MAX_LEVELS:
+        unlocked_levels.add(level_number + 1)
 
-    stars = prog.get("level_stars", {})
+    stars = dict(progress.get("level_stars", {}))
     if completed:
-        stars[str(level.level_number)] = int(getattr(level, "star_rating", 1))
+        stars[str(level_number)] = max(1, min(3, int(getattr(level, "star_rating", 1))))
 
-    checkpoints = prog.get("checkpoints", {})
+    checkpoints = dict(progress.get("checkpoints", {}))
     if level.current_checkpoint is not None and not completed:
         current_checkpoint_id = level.current_checkpoint.checkpoint_id
         activated_ids = {
@@ -128,32 +204,24 @@ def save_game(level, unlock_next=False, completed=False, username=None):
             for checkpoint in getattr(level, "checkpoints", [])
             if getattr(checkpoint, "activated", False)
         }
-        # The currently saved checkpoint is known to be activated even when
-        # a lightweight test/dummy level does not expose the checkpoint list.
         activated_ids.add(current_checkpoint_id)
-        checkpoints[str(level.level_number)] = {
+        checkpoints[str(level_number)] = {
             "id": current_checkpoint_id,
             "activated_ids": sorted(activated_ids),
         }
     else:
-        # Level finished (or has no active checkpoint): don't leave a
-        # stale mid-level checkpoint behind for next time it's played.
-        checkpoints.pop(str(level.level_number), None)
+        checkpoints.pop(str(level_number), None)
 
-    prog["unlocked_levels"] = sorted(set(unlocked_levels))
-    prog["level_stars"] = stars
-    prog["checkpoints"] = checkpoints
-    diffs[difficulty] = prog
+    progress["unlocked_levels"] = sorted(unlocked_levels)
+    progress["level_stars"] = stars
+    progress["checkpoints"] = checkpoints
 
     total_collectibles = (
         int(existing_data.get("total_collectibles", 0)) + int(getattr(level, "new_collectibles", 0))
-        if completed else
-        int(existing_data.get("total_collectibles", 0))
+        if completed else int(existing_data.get("total_collectibles", 0))
     )
     achievements = existing_data.get("achievements", default_state())
-
     eval_context = {
-        "difficulties": diffs,
         "level_stars": stars,
         "total_collectibles": total_collectibles,
         "achievements": achievements,
@@ -162,7 +230,7 @@ def save_game(level, unlock_next=False, completed=False, username=None):
 
     data = {
         "version": SAVE_VERSION,
-        "difficulties": diffs,
+        "progress": progress,
         "total_collectibles": total_collectibles,
         "achievements": new_achievements,
     }
@@ -177,19 +245,13 @@ def save_game(level, unlock_next=False, completed=False, username=None):
 
 def load_game(level, level_select=None, username=None):
     data = _read(username)
-    difficulty = _normalize_difficulty(getattr(level, "difficulty", "normal"))
-    prog = data["difficulties"][difficulty]
+    progress = data["progress"]
 
-    # Only restore a checkpoint that was saved for THIS level, on THIS
-    # difficulty - this is what keeps checkpoints independent per level
-    # instead of leaking into whichever level/difficulty loads next.
-    checkpoint_data = prog.get("checkpoints", {}).get(str(level.level_number))
+    checkpoint_data = progress.get("checkpoints", {}).get(str(level.level_number))
     if checkpoint_data is not None:
         saved_id = checkpoint_data.get("id")
         saved_activated_ids = checkpoint_data.get("activated_ids")
         if not isinstance(saved_activated_ids, list):
-            # Backward compatibility with saves made before activated flag
-            # states were stored; only the known saved checkpoint is green.
             saved_activated_ids = [saved_id] if saved_id is not None else []
         saved_activated_ids = set(saved_activated_ids)
         for checkpoint in level.checkpoints:
@@ -199,23 +261,19 @@ def load_game(level, level_select=None, username=None):
                 level.current_checkpoint = checkpoint
 
     if level_select is not None:
-        for n in prog.get("unlocked_levels", [1]): level_select.unlock_level(int(n))
-        level_select.set_stars(prog.get("level_stars", {}))
+        for number in progress.get("unlocked_levels", [1]):
+            level_select.unlock_level(int(number))
+        level_select.set_stars(progress.get("level_stars", {}))
     return True
 
 
-def load_progress(username=None, difficulty=None):
-    """Returns the full save data. If `difficulty` is given, also includes
-    a convenience 'current' key with just that difficulty's progress."""
-    data = _read(username)
-    if difficulty is not None:
-        data = dict(data)
-        data["current"] = data["difficulties"][_normalize_difficulty(difficulty)]
-    return data
+def load_progress(username=None):
+    """Return the unified campaign progress for levels 1 through 20."""
+    return _read(username)
 
 
 def delete_save(username=None):
-    """Deletes ONLY the given (or currently logged-in) user's save file."""
+    """Delete only the given user's save file."""
     path = _save_path(username)
     if path and os.path.exists(path):
         os.remove(path)

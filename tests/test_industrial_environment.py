@@ -76,34 +76,23 @@ def test_every_referenced_tile_and_decoration_asset_exists():
     assert object_names <= object_stems
 
 
-def test_all_ten_normal_level_slots_are_defined():
+def test_twenty_level_campaign_keeps_world_two_slots_defined():
     import sys
     sys.path.insert(0, str(PROJECT_ROOT))
     from src.settings import MAX_LEVELS
     from src.world.level_data import LEVELS
 
-    assert MAX_LEVELS == 10
+    assert MAX_LEVELS == 20
     assert tuple(LEVELS["normal"]) == tuple(range(1, 11))
+    assert all(level["world_number"] == 2 for level in LEVELS["normal"].values())
     assert all(level["difficulty"] == "Normal" for level in LEVELS["normal"].values())
 
-def test_normal_only_renderer_branches_and_decorations_are_wired():
+def test_legacy_industrial_renderer_is_not_active_in_the_two_world_campaign():
     source = LEVEL_SOURCE.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    level_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Level")
-    draw_method = next(node for node in level_class.body if isinstance(node, ast.FunctionDef) and node.name == "draw")
-    calls = []
-    for node in ast.walk(draw_method):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            calls.append(node.func.id)
-    assert "draw_industrial_background" in calls
-    assert "draw_industrial_ground" in calls
-    assert "draw_industrial_platform" in calls
-    assert "draw_industrial_moving_platform" in calls
-    assert "draw_industrial_pit" in calls
-    assert "draw_industrial_decorations" in calls
-
-    assert 'elif self.difficulty == "normal":\n            draw_industrial_background' in source
-    assert 'if self.difficulty == "normal":\n            draw_industrial_decorations' in source
+    assert "draw_industrial_" not in source
+    assert "draw_green_zone_background" in source
+    assert "draw_green_zone_decorations" in source
+    assert 'elif self.difficulty == "normal":\n            draw_green_zone_background' in source
     assert 'elif self.difficulty == "easy":\n            draw_easy_ground' in source
 
 

@@ -1,4 +1,4 @@
-"""Green Zone world renderer used exclusively by Normal difficulty.
+"""Green Zone world renderer used exclusively by World 2.
 
 All render functions are visual-only: they use the level's existing world
 rectangles without modifying collisions, movement, or gameplay state.
@@ -244,7 +244,7 @@ def _draw_background_layer(screen, layer, camera, horizontal_rate, vertical_rate
 def draw_green_zone_background(screen, camera, world_width, ground_top_y, seed=0, level_number=1):
     """Compose supplied numbered forest layers with stable, level-seeded parallax.
 
-    The first half of Normal uses daylight, while levels 6-10 transition to the
+    The first five World 2 levels use daylight, while its levels 6-10 transition to the
     matching night art. This gives the same cohesive Green Zone theme variety
     without changing any level geometry or mechanics.
     """

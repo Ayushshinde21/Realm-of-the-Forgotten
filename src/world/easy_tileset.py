@@ -1,4 +1,4 @@
-"""Adventure tiles used only by Easy difficulty."""
+"""Adventure tiles used only by World 1."""
 
 import pygame
 

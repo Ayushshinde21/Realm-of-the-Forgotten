@@ -20,14 +20,15 @@ def pygame_display():
     pygame.quit()
 
 
-@pytest.mark.parametrize("level_number", range(1, MAX_LEVELS + 1))
-def test_normal_platform_generation_succeeds_for_200_seeds(level_number):
-    """Stress the generator with the exact Normal difficulty ramp for 200 seeds."""
-    width = LEVELS["normal"][level_number]["world_width"]
+@pytest.mark.parametrize("level_number", range(11, MAX_LEVELS + 1))
+def test_world_two_platform_generation_succeeds_for_200_seeds(level_number):
+    """Stress World 2's platform generation for all ten campaign levels."""
+    world_level = level_number - 10
+    width = LEVELS["normal"][world_level]["world_width"]
     progress = (level_number - 1) / max(1, MAX_LEVELS - 1)
     generator = PlatformGenerator(width, world_height=WORLD_HEIGHT)
     generator.platform_size_multiplier = 2.0
-    generator.base_difficulty = 0.8 + progress * 1.4
+    generator.base_difficulty = 0.5 + progress * 1.9
     generator.safe_start_zone_width = 300
 
     for seed in range(200):
@@ -59,11 +60,11 @@ def _sweep(level, moving):
     return sweep, max_down
 
 
-@pytest.mark.parametrize("level_number", range(1, MAX_LEVELS + 1))
-def test_normal_layout_has_safe_moving_platforms_checkpoint_and_finish(level_number):
-    level = Level(seed=20261017 + level_number, level_number=level_number, difficulty="normal")
+@pytest.mark.parametrize("level_number", range(11, MAX_LEVELS + 1))
+def test_world_two_layout_has_safe_moving_platforms_checkpoint_and_finish(level_number):
+    level = Level(seed=20261017 + level_number, level_number=level_number)
 
-    if level_number == 1:
+    if level_number == 11:
         assert len(level.moving_platforms) >= 2
 
     static_platforms = [platform for platform in level.platforms]
@@ -77,7 +78,7 @@ def test_normal_layout_has_safe_moving_platforms_checkpoint_and_finish(level_num
             assert moving.rect.top <= level.ground.rect.top - 80
             assert moving.start_y + max_down + moving.rect.height <= level.ground.rect.top - 40
 
-    assert level.checkpoints, f"Normal level {level_number} has no checkpoint"
+    assert level.checkpoints, f"World 2 level {level_number} has no checkpoint"
     assert abs(level.finish_x - (level.width - 200)) <= 400
 
     spawn_safe_zone = pygame.Rect(0, level.ground.rect.top - 140, 300, 140)

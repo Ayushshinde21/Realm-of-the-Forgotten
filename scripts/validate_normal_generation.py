@@ -1,4 +1,4 @@
-"""Build Normal levels 1-10 across many seeds and verify generation invariants.
+"""Build World 2 levels 11-20 across many seeds and verify generation invariants.
 
 Run from the project root with Pygame installed:
     python scripts/validate_normal_generation.py --seeds 200
@@ -45,15 +45,16 @@ def main() -> int:
         moving_platforms_checked = 0
         checkpoints_checked = 0
         try:
-            for level_number in range(1, MAX_LEVELS + 1):
-                width = LEVELS["normal"][level_number]["world_width"]
+            for level_number in range(11, MAX_LEVELS + 1):
+                world_level = level_number - 10
+                width = LEVELS["normal"][world_level]["world_width"]
                 progress = (level_number - 1) / max(1, MAX_LEVELS - 1)
 
                 for seed in range(args.seeds):
                     random.seed(seed)
                     generator = PlatformGenerator(width, world_height=WORLD_HEIGHT)
                     generator.platform_size_multiplier = 2.0
-                    generator.base_difficulty = 0.8 + progress * 1.4
+                    generator.base_difficulty = 0.5 + progress * 1.9
                     generated = generator.generate()
                     if not generated:
                         raise AssertionError(f"No platforms: level={level_number}, seed={seed}")
@@ -67,12 +68,12 @@ def main() -> int:
                                 f"Unsafe gap {gap}: level={level_number}, seed={seed}"
                             )
 
-                    level = Level(seed=seed, level_number=level_number, difficulty="normal")
+                    level = Level(seed=seed, level_number=level_number)
                     if abs(level.finish_x - (level.width - 200)) > 400:
                         raise AssertionError(f"Finish drift: level={level_number}, seed={seed}")
                     if level.width > 3000 and not level.checkpoints:
                         raise AssertionError(f"Missing checkpoint: level={level_number}, seed={seed}")
-                    if level_number == 1 and len(level.moving_platforms) < 2:
+                    if level_number == 11 and len(level.moving_platforms) < 2:
                         raise AssertionError(f"Level 1 has fewer than 2 moving platforms: seed={seed}")
 
                     for moving in level.moving_platforms:
@@ -98,7 +99,7 @@ def main() -> int:
                     worlds_checked += 1
 
             print(
-                f"PASS: {worlds_checked} Normal level builds ({args.seeds} seeds x {MAX_LEVELS} levels); "
+                f"PASS: {worlds_checked} World 2 level builds ({args.seeds} seeds x {MAX_LEVELS} levels); "
                 f"{moving_platforms_checked} moving platforms checked; "
                 f"{checkpoints_checked} checkpoints checked."
             )

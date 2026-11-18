@@ -30,12 +30,12 @@ class WinScreen:
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                return "NEXT" if self.level_number < MAX_LEVELS else "MENU"
+                return "NEXT"
             if event.key == pygame.K_ESCAPE:
                 return "MENU"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.btn_menu.collidepoint(event.pos): return "MENU"
-            if self.btn_next.collidepoint(event.pos): return "NEXT" if self.level_number < MAX_LEVELS else "MENU"
+            if self.btn_next.collidepoint(event.pos): return "NEXT"
         return None
 
     def update(self):
@@ -85,4 +85,4 @@ class WinScreen:
         self.screen.blit(score, score.get_rect(center=(self.width // 2, 395)))
 
         draw_button(self.screen, self.btn_menu, "☰ MENU")
-        draw_button(self.screen, self.btn_next, "→ NEXT" if self.level_number < MAX_LEVELS else "→ MENU")
+        draw_button(self.screen, self.btn_next, "→ NEXT" if self.level_number < MAX_LEVELS else "→ CREDITS")

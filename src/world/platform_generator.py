@@ -100,8 +100,8 @@ class PlatformGenerator:
             - self.minimum_ground_platform_gap
         )
 
-        # Normal difficulty can reserve a clear starting corridor near the
-        # ground. Other difficulties leave this at zero and keep their layout.
+        # World 2 can reserve a clear starting corridor near the ground.
+        # World 1 leaves this at zero and keeps its established layout.
         self.safe_start_zone_width = 0
 
     # ==============================================

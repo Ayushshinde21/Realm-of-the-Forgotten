@@ -15,8 +15,8 @@ def pygame_display():
     pygame.quit()
 
 
-def _new_level(number, difficulty="easy", seed=81273):
-    return Level(seed=seed, level_number=number, difficulty=difficulty)
+def _new_level(number, seed=81273):
+    return Level(seed=seed, level_number=number)
 
 
 def test_easy_level_5_is_a_single_orc_boss_arena():
@@ -128,15 +128,14 @@ def test_boss_hp_decreases_once_per_attack_id_and_defeat_completes_level():
     assert level.level_complete
 
 
-@pytest.mark.parametrize("difficulty", ["normal", "hard"])
-@pytest.mark.parametrize("number", [5, 10])
-def test_boss_levels_do_not_change_normal_or_hard(difficulty, number):
-    level = _new_level(number, difficulty=difficulty, seed=81273)
+@pytest.mark.parametrize("number", [11, 15, 20])
+def test_world_two_levels_do_not_create_world_one_bosses(number):
+    level = _new_level(number, seed=81273)
     assert not level.is_boss_level
     assert level.boss is None
     assert level.level_name != "Orc Boss Fight"
     assert level.level_name != "Yokai Boss Fight"
-    assert level.world_width == LEVELS[difficulty][number]["world_width"]
+    assert level.world_width == LEVELS["normal"][number - 10]["world_width"]
     assert level.player.jump_strength == pytest.approx(-14)
     assert len(level.platforms) > 1
 

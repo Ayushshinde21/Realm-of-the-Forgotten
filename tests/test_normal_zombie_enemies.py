@@ -119,10 +119,10 @@ def test_zombie_locomotion_animation_loops_while_action_animations_stay_one_shot
     assert 'self._advance_animation(loop=is_normal_zombie)' in source
 
 
-def test_easy_and_hard_enemy_selection_paths_remain_separate():
+def test_world_one_and_world_two_enemy_selection_paths_remain_separate():
     source = LEVEL_SOURCE.read_text(encoding="utf-8")
     assert 'if self.difficulty == "easy":\n                enemy_type = "slime"' in source
-    assert 'if enemy_type == "slime" and self.difficulty in ("easy", "hard"):' in source
+    assert 'if enemy_type == "slime" and self.difficulty == "easy":' in source
     assert 'if self.difficulty == "normal":\n                # Normal\'s roster is replaced completely by animated zombies.' in source
 
 

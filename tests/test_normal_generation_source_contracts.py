@@ -19,7 +19,7 @@ def test_normal_moving_platforms_validate_their_full_sweep():
     assert "preferred_centers" in LEVEL_SOURCE
     assert "if any(sweep.colliderect(platform.rect) for platform in static_platforms):" in LEVEL_SOURCE
     assert "self._generate_normal_moving_platforms()" in LEVEL_SOURCE
-    assert "Preserve the previous fixed moving-platform layout for Easy/Hard." in LEVEL_SOURCE
+    assert "World 1 keeps its previous fixed moving-platform layout." in LEVEL_SOURCE
 
 
 def test_normal_checkpoints_try_alternate_platforms_and_ground_fallback():

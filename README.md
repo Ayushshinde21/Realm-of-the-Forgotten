@@ -1,8 +1,10 @@
 # Veggie Quest: Rescue at Snackland
 
 A 2D pixel-art platformer made with Python and pygame. Fight your way through
-10 levels on three difficulties (easy, normal, hard), collect coins, rescue
-Snackland and earn up to 3 stars per level.
+one 20-level campaign split across two worlds, collect coins, rescue Snackland,
+and earn up to 3 stars per level. World 1 is **Snackland Meadows** (levels 1-10);
+World 2 is **Greenwild Frontier** (levels 11-20). Challenge increases as the
+player progresses, and the active world is selected automatically by level.
 
 Version: see `VERSION` in `src/settings.py` (also shown on the main menu).
 
@@ -76,39 +78,27 @@ Zip the `dist/VeggieQuest` folder and share it; no Python is needed to run it.
 * `tests/` - automated tests
 
 
-## Animated Slime Enemies
+## World 1 — Snackland Meadows
 
-The Green, Blue, and Red Slime sprite sheets are integrated as animated enemies. Their idle, run, attack, hurt, and death frames are stored under `assets/enemies/`. Easy uses only these three slime variants, with Green most common, slightly enlarged sprites, and no rocks or bushes. Hard retains its existing enemy and obstacle generation; Normal keeps its robot enemy roster.
+World 1 uses the Adventure tileset in `assets/tilesets/adventure_easy/`, the
+fighter sprite sheets in `assets/fighter/`, animated thorn hazards, and the
+slime/swordsman enemy roster. Thorn contact slows movement and jumping by 5x
+and deals 2 hearts of damage per second while contact continues.
 
-The source sprite package also contains jump, walk, and run-attack sheets; the current integration uses the five gameplay states needed by the existing enemy AI.
+## World 2 — Greenwild Frontier
 
-## Easy-only fighter character
+World 2 uses the Green Zone pack under `assets/tilesets/green_zone/`, the
+Gangsters_2 player sprite sheets under `assets/gangster/`, animated coins, and
+seven animated zombie variants. Its layered forest backgrounds transition
+from daylight to the night palette during the second half of the world.
+Decorative placements are deterministic for a given level seed and do not add
+collisions or change gameplay geometry.
 
-Easy difficulty uses the fighter sprite sheets in `assets/fighter/` for idle,
-run, jump, attack, and death animations. Normal and Hard continue to use the
-original player sprites under `assets/player/`.
+## Campaign progression
 
-### Difficulty-specific terrain
-
-Easy difficulty uses the Adventure tileset bundled in `assets/tilesets/adventure_easy/`. Normal uses the supplied Green Zone tileset, while Hard keeps its existing terrain rendering.
-
-Easy also replaces generated pits with animated thorn patches. Thorn contact slows movement and jumping by 5x and deals 2 hearts of damage per second while contact continues; Normal and Hard retain their existing pit behavior.
-
-## Normal Difficulty — Green Zone
-
-All 10 Normal levels use the supplied Green Zone pack under
-`assets/tilesets/green_zone/`. The environment includes layered day/night
-forest and skyline backgrounds, grass-topped ground and platforms, rocky pit
-walls, trees, stones, and animated fountains. Levels 1–5 use daylight artwork
-and levels 6–10 use the night palette. Decorative placements are deterministic
-for a given level seed and do not add collisions or change gameplay geometry.
-Easy retains its Adventure/thorn environment and Hard retains its existing
-terrain renderer and gameplay.
-## Normal Difficulty Zombie Enemies
-
-Normal difficulty uses seven animated zombie variants from the bundled urban
-and character zombie sprite-sheet packs. Idle, walk/run, attack, hurt, and death
-frames are sliced and cached when first used. Zombie variants share melee combat
-with different reach, detection distance, recovery time, height, and movement
-speed. Easy and Hard keep their separate enemy rosters.
+The level-select screen shows both worlds and all 20 global level numbers.
+World 1 contains levels 1-10; completing level 10 unlocks World 2 level 11.
+The game automatically chooses the correct world content and gradually raises
+platform and enemy pressure as the campaign level increases. Save files from
+the former Easy and Normal campaigns are migrated into the unified progression.
 

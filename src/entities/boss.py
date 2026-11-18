@@ -1,4 +1,4 @@
-"""Asset-backed bosses used only in Easy difficulty levels 5 and 10."""
+"""Asset-backed World 1 bosses used at campaign levels 5 and 10."""
 from __future__ import annotations
 
 import os

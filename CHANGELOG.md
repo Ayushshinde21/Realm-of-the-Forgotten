@@ -1,3 +1,12 @@
+## Two-world 20-level campaign (November 18, 2026)
+
+- Replaced the separate difficulty-selection screen with a two-world campaign: Snackland Meadows (levels 1-10) and Greenwild Frontier (levels 11-20).
+- Removed the Hard game mode; world content is now selected automatically from the global level number.
+- Combined the former Easy and Normal 10-level tracks into one continuous 20-level progression, with level 10 unlocking level 11.
+- Increased challenge gradually across all 20 levels and preserved World 2's local day/night visual progression.
+- Migrated legacy Easy/Normal save data into the new unified campaign format; discarded the removed Hard save track.
+- Updated level selection, world labels, campaign tests, and project documentation.
+
 ## Normal Difficulty — Movement and enemy-size fixes (October 21, 2026)
 
 - Prevent Normal moving platforms from travelling above the playable player-height boundary, where the player could be pushed out of alignment and lose platform support.

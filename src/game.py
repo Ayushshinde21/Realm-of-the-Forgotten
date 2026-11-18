@@ -5,13 +5,12 @@ import pygame
 
 from src import keybinds, user_settings
 from src.settings import (
-    WIDTH, HEIGHT, FPS, TITLE, SKY_BLUE, BLACK, FULLSCREEN, MAX_LEVELS, DEFAULT_DIFFICULTY,
+    WIDTH, HEIGHT, FPS, TITLE, SKY_BLUE, BLACK, FULLSCREEN, MAX_LEVELS,
 )
 from src.sound_manager import SoundManager
 from src.world.level import Level
 from src.ui.login_screen import LoginScreen
 from src.ui.main_menu import MainMenu
-from src.ui.difficulty_select import DifficultySelect
 from src.ui.level_select import LevelSelect
 from src.ui.pause_menu import PauseMenu
 from src.ui.achievements import Achievements
@@ -57,7 +56,6 @@ class Game:
 
         # In-game state (only relevant once logged_in is True)
         self.game_started = False
-        self.difficulty_selected = False
         self.level_selected = False
         self.paused = False
         self.game_over = False
@@ -66,9 +64,6 @@ class Game:
         self.settings_open = False
         self.controls_open = False
         self.credits_open = False
-
-        # Chosen on the difficulty screen and passed explicitly to every Level.
-        self.difficulty = DEFAULT_DIFFICULTY
 
         # Screen shake / hit feedback.
         self.shake_frames = 0
@@ -82,7 +77,6 @@ class Game:
         self.login_screen = LoginScreen(self.screen)
         self.registration = RegistrationScreen(self.screen)
         self.menu = MainMenu(self.screen)
-        self.difficulty_select = DifficultySelect(self.screen)
         self.level_select = LevelSelect(self.screen)
         self.pause_menu = PauseMenu(self.screen)
         self.achievements_menu = Achievements(self.screen)
@@ -126,7 +120,6 @@ class Game:
         self.level = Level(
             level_number=level_number,
             sound_manager=self.sound_manager,
-            difficulty=self.difficulty,
         )
         self.level_selected = True
         self.shake_frames = 0
@@ -148,12 +141,11 @@ class Game:
         """(Re)loads the CURRENTLY LOGGED-IN user's progress into the
         level select and achievements screens. Always resets first so a
         previous user's unlocks/achievements never leak into the next.
-        Levels/stars are scoped to the currently selected difficulty, so
-        each difficulty has its own independent 1-10 progression."""
+        Progress and stars are stored in one continuous 1-20 campaign."""
         self.level_select.reset()
         self.achievements_menu.reset()
-        data = load_progress(difficulty=self.difficulty)
-        current = data.get("current", {})
+        data = load_progress()
+        current = data.get("progress", {})
         self.level_select.set_stars(current.get("level_stars", {}))
         for n in current.get("unlocked_levels", [1]):
             self.level_select.unlock_level(int(n))
@@ -163,7 +155,6 @@ class Game:
         """Resets all in-game screen flags. Called on login and logout so
         a fresh session always starts back at the main menu cleanly."""
         self.game_started = False
-        self.difficulty_selected = False
         self.level_selected = False
         self.paused = False
         self.game_over = False
@@ -249,30 +240,21 @@ class Game:
                 continue
 
             if not self.game_started:
-                if not self.difficulty_selected:
-                    result = self.menu.handle_event(event)
-                    if result == PLAY:
-                        self.difficulty_selected = True
-                    elif result == ACHIEVEMENTS:
-                        self.refresh_progress()
-                        self.achievements_screen = True
-                    elif result == SETTINGS:
-                        self.settings_open = True
-                    elif result == LOGOUT:
-                        self._do_logout()
-                    elif result == QUIT:
-                        self.running = False
-                else:
-                    result = self.difficulty_select.handle_event(event)
-                    if result in ("easy", "normal", "hard"):
-                        self.difficulty = result
-                        self.difficulty_selected = False
-                        self.game_started = True
-                        self.level_selected = False
-                        self.refresh_progress()
-                        self.sound_manager.play_music()
-                    elif result == BACK:
-                        self.difficulty_selected = False
+                result = self.menu.handle_event(event)
+                if result == PLAY:
+                    self.game_started = True
+                    self.level_selected = False
+                    self.refresh_progress()
+                    self.sound_manager.play_music()
+                elif result == ACHIEVEMENTS:
+                    self.refresh_progress()
+                    self.achievements_screen = True
+                elif result == SETTINGS:
+                    self.settings_open = True
+                elif result == LOGOUT:
+                    self._do_logout()
+                elif result == QUIT:
+                    self.running = False
                 continue
 
             if not self.level_selected:
@@ -445,8 +427,7 @@ class Game:
             pygame.display.flip()
             return
         if not self.game_started:
-            if self.difficulty_selected: self.difficulty_select.draw()
-            else: self.menu.draw()
+            self.menu.draw()
             pygame.display.flip()
             return
         if not self.level_selected:
