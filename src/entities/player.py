@@ -17,7 +17,7 @@ class Player(GameObject):
 
     def __init__(self, x, y, character_type="default"):
         super().__init__(x, y, 40, 60)
-        self.character_type = "fighter" if str(character_type).lower() == "fighter" else "default"
+        self.character_type = str(character_type).lower() if str(character_type).lower() in ("fighter", "gangster2") else "default"
 
         # Movement
         self.base_speed = PLAYER_SPEED
@@ -64,6 +64,13 @@ class Player(GameObject):
             self._load_spritesheet_frames("Attack_1.png", self.attack1_frames)
             self._load_spritesheet_frames("Attack_2.png", self.attack2_frames)
             self._load_spritesheet_frames("Dead.png", self.dead_frames)
+        elif self.character_type == "gangster2":
+            self._load_spritesheet_frames("Idle.png", self.idle_frames, "gangster")
+            self._load_spritesheet_frames("Run.png", self.walk_frames, "gangster")
+            self._load_spritesheet_frames("Jump.png", self.jump_frames, "gangster")
+            self._load_spritesheet_frames("Attack_1.png", self.attack1_frames, "gangster")
+            self._load_spritesheet_frames("Attack_2.png", self.attack2_frames, "gangster")
+            self._load_spritesheet_frames("Dead.png", self.dead_frames, "gangster")
         else:
             self._load_animation_frames("idle", "idle_", 6, self.idle_frames)
             self._load_animation_frames("walk", "walk_", 8, self.walk_frames)
@@ -175,15 +182,15 @@ class Player(GameObject):
 
         _FRAME_CACHE[cache_key] = list(target)
 
-    def _load_spritesheet_frames(self, filename, target):
-        """Load a 128px-cell fighter spritesheet using stable foot anchoring."""
-        cache_key = ("fighter_sheet", filename)
+    def _load_spritesheet_frames(self, filename, target, asset_folder="fighter"):
+        """Load a horizontal character spritesheet using stable foot anchoring."""
+        cache_key = ("character_sheet", asset_folder, filename)
         if cache_key in _FRAME_CACHE:
             target.extend(_FRAME_CACHE[cache_key])
             return
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        path = os.path.join(base_dir, "assets", "fighter", filename)
+        path = os.path.join(base_dir, "assets", asset_folder, filename)
 
         try:
             sheet = pygame.image.load(path).convert_alpha()

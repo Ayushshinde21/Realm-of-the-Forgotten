@@ -1,0 +1,10 @@
+Player character sprite sheets: Gangsters_1 from the Craftpix Free Gangster Pixel Character Sprite Sheets Pack.
+The source archive's Licens.txt points to: https://craftpix.net/file-licenses/
+Animation mapping in the game:
+Idle.png -> idle
+Run.png -> movement
+Jump.png -> jump
+Attack_1.png -> first attack
+Attack_2.png (copied from the pack's Shot.png) -> alternate shooting attack
+Dead.png -> death
+Hurt.png, Walk.png, Idle_2.png, and Recharge.png are retained for future animation use.

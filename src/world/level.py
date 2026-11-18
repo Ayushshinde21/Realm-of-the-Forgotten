@@ -80,7 +80,7 @@ EASY_COIN_SPACING = 42
 EASY_COIN_MAX_RAISE = 108
 THORN_SLOW_FACTOR = 5.0
 THORN_DAMAGE_INTERVAL_FRAMES = 30  # Two hearts per second at 60 FPS.
-_EASY_COIN_FRAME_CACHE = None
+_COIN_FRAME_CACHE = None
 
 
 class Level:
@@ -303,7 +303,7 @@ class Level:
         self.player = Player(
             self.player_start_x,
             self.player_start_y,
-            character_type="fighter" if self.difficulty == "easy" else "default",
+            character_type=("fighter" if self.difficulty == "easy" else "gangster2" if self.difficulty == "normal" else "default"),
         )
         if self.is_boss_level:
             self.player.jump_strength = -17.0
@@ -719,10 +719,10 @@ class Level:
     def _item_position_clear(self, center_x, min_spacing=ITEM_MIN_SPACING, exclude=None):
         return all(abs(center_x - other_x) >= min_spacing for other_x in self._item_center_xs(exclude))
 
-    def _load_easy_coin_frames(self):
-        global _EASY_COIN_FRAME_CACHE
-        if _EASY_COIN_FRAME_CACHE is not None:
-            return _EASY_COIN_FRAME_CACHE
+    def _load_coin_frames(self):
+        global _COIN_FRAME_CACHE
+        if _COIN_FRAME_CACHE is not None:
+            return _COIN_FRAME_CACHE
 
         asset_root = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -747,8 +747,8 @@ class Level:
                 pygame.transform.smoothscale(image, (target_width, target_height))
             )
 
-        _EASY_COIN_FRAME_CACHE = tuple(frames)
-        return _EASY_COIN_FRAME_CACHE
+        _COIN_FRAME_CACHE = tuple(frames)
+        return _COIN_FRAME_CACHE
 
     def _easy_coin_group_is_clear(self, positions, size):
         """Return False if any coin overlaps an enemy's patrol corridor or a checkpoint/hazard."""
@@ -783,7 +783,7 @@ class Level:
     def _generate_easy_collectibles(self):
         """Generate alternating rows and semi-circle coin trails for Easy only."""
         self.collectibles.clear()
-        frames = self._load_easy_coin_frames()
+        frames = self._load_coin_frames()
         final_start = getattr(self, "final_approach_start", self.width)
         size = EASY_COIN_SIZE
         base_y_offset = size + EASY_COIN_LINE_OFFSET
@@ -857,6 +857,7 @@ class Level:
             return
 
         final_start = getattr(self, "final_approach_start", self.width)
+        coin_frames = self._load_coin_frames() if self.difficulty == "normal" else None
 
         for platform in self.platforms[1:]:
             if platform.rect.centerx >= final_start - 70:
@@ -871,7 +872,13 @@ class Level:
                 x = random.randint(platform.rect.left + margin, platform.rect.right - margin - size)
                 if not self._item_position_clear(x + size // 2, 100):
                     continue
-                self.collectibles.append(Collectible(x, platform.rect.top - 30))
+                self.collectibles.append(
+                    Collectible(
+                        x,
+                        platform.rect.top - 30,
+                        animation_frames=coin_frames,
+                    )
+                )
                 break
 
     def generate_checkpoints(self):
